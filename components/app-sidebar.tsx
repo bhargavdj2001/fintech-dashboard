@@ -15,6 +15,11 @@ import {
   ChevronDown,
   LogOut,
   Bell,
+  Building2,
+  Target,
+  FileText,
+  Repeat,
+  Banknote,
 } from "lucide-react"
 
 import {
@@ -76,6 +81,11 @@ const mainNavItems = [
 
 const accountItems = [
   {
+    title: "All Accounts",
+    url: "/accounts",
+    icon: Building2,
+  },
+  {
     title: "Bank Accounts",
     url: "/accounts/bank",
     icon: Wallet,
@@ -84,6 +94,29 @@ const accountItems = [
     title: "Credit Cards",
     url: "/accounts/cards",
     icon: CreditCard,
+  },
+  {
+    title: "Cash",
+    url: "/accounts/cash",
+    icon: Banknote,
+  },
+]
+
+const planningItems = [
+  {
+    title: "Goals",
+    url: "/goals",
+    icon: Target,
+  },
+  {
+    title: "Recurring",
+    url: "/recurring",
+    icon: Repeat,
+  },
+  {
+    title: "Reports",
+    url: "/reports",
+    icon: FileText,
   },
 ]
 
@@ -143,6 +176,30 @@ export function AppSidebar() {
           <SidebarGroupContent>
             <SidebarMenu>
               {accountItems.map((item) => (
+                <SidebarMenuItem key={item.title}>
+                  <SidebarMenuButton
+                    asChild
+                    isActive={pathname === item.url || pathname.startsWith(item.url + "/")}
+                    className="h-10 px-3 transition-colors"
+                  >
+                    <Link href={item.url}>
+                      <item.icon className="h-4 w-4" />
+                      <span>{item.title}</span>
+                    </Link>
+                  </SidebarMenuButton>
+                </SidebarMenuItem>
+              ))}
+            </SidebarMenu>
+          </SidebarGroupContent>
+        </SidebarGroup>
+
+        <SidebarGroup>
+          <SidebarGroupLabel className="text-xs font-medium text-muted-foreground uppercase tracking-wider">
+            Planning
+          </SidebarGroupLabel>
+          <SidebarGroupContent>
+            <SidebarMenu>
+              {planningItems.map((item) => (
                 <SidebarMenuItem key={item.title}>
                   <SidebarMenuButton
                     asChild

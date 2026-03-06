@@ -3,6 +3,8 @@ import { AppSidebar } from "@/components/app-sidebar"
 import { Separator } from "@/components/ui/separator"
 import { ThemeToggle } from "@/components/theme-toggle"
 import { DashboardBreadcrumb } from "@/components/dashboard-breadcrumb"
+import { CommandPalette } from "@/components/command-palette"
+import { CommandShortcut } from "@/components/command-shortcut"
 
 export default function DashboardLayout({
   children,
@@ -18,6 +20,7 @@ export default function DashboardLayout({
           <Separator orientation="vertical" className="h-4" />
           <DashboardBreadcrumb />
           <div className="ml-auto flex items-center gap-2">
+            <CommandShortcut />
             <ThemeToggle />
           </div>
         </header>
@@ -25,6 +28,7 @@ export default function DashboardLayout({
           <div className="p-6">{children}</div>
         </main>
       </SidebarInset>
+      <CommandPalette />
     </SidebarProvider>
   )
 }
