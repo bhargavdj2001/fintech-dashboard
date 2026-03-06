@@ -20,6 +20,9 @@ const routeLabels: Record<string, string> = {
   "accounts": "Accounts",
   "bank": "Bank Accounts",
   "cards": "Credit Cards",
+  "recurring": "Recurring Transactions",
+  "goals": "Goals",
+  "reports": "Reports",
 }
 
 export function DashboardBreadcrumb() {
@@ -38,32 +41,32 @@ export function DashboardBreadcrumb() {
     )
   }
 
+  const items = [
+    { label: "Dashboard", href: "/" },
+    ...segments.map((segment, index) => ({
+      label: routeLabels[segment] || segment.charAt(0).toUpperCase() + segment.slice(1),
+      href: "/" + segments.slice(0, index + 1).join("/"),
+      isLast: index === segments.length - 1,
+    })),
+  ]
+
   return (
     <Breadcrumb>
       <BreadcrumbList>
-        <BreadcrumbItem>
-          <BreadcrumbLink href="/" className="text-sm">
-            Dashboard
-          </BreadcrumbLink>
-        </BreadcrumbItem>
-        {segments.map((segment, index) => {
-          const href = "/" + segments.slice(0, index + 1).join("/")
-          const isLast = index === segments.length - 1
-          const label = routeLabels[segment] || segment.charAt(0).toUpperCase() + segment.slice(1)
-
-          return (
-            <BreadcrumbItem key={segment}>
-              <BreadcrumbSeparator />
-              {isLast ? (
-                <BreadcrumbPage className="text-sm font-medium">{label}</BreadcrumbPage>
+        {items.map((item, index) => (
+          <div key={item.href} className="flex items-center gap-1.5">
+            <BreadcrumbItem>
+              {item.isLast ? (
+                <BreadcrumbPage className="text-sm font-medium">{item.label}</BreadcrumbPage>
               ) : (
-                <BreadcrumbLink href={href} className="text-sm">
-                  {label}
+                <BreadcrumbLink href={item.href} className="text-sm">
+                  {item.label}
                 </BreadcrumbLink>
               )}
             </BreadcrumbItem>
-          )
-        })}
+            {index < items.length - 1 && <BreadcrumbSeparator />}
+          </div>
+        ))}
       </BreadcrumbList>
     </Breadcrumb>
   )
