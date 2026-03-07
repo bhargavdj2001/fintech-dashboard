@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import { fetchTransactions, fetchSplitSummary, type Transaction as ApiTransaction, type SplitSummary } from "@/lib/api"
 import {
   Plus,
   Users,
@@ -188,24 +189,6 @@ interface SplitTxn {
   status: "settled" | "pending"
 }
 
-const ALL_SPLIT_TXNS: SplitTxn[] = [
-  { id: "s1",  date: "2024-03-05", title: "Groceries",           group: "Household",      totalAmount: 127.45, yourShare: 63.73,  partnerShare: 63.72,  paidBy: "you",     status: "pending"  },
-  { id: "s2",  date: "2024-03-04", title: "Restaurant Dinner",   group: "Trip to Paris",  totalAmount: 245.00, yourShare: 81.67,  partnerShare: 81.67,  paidBy: "partner", status: "settled"  },
-  { id: "s3",  date: "2024-03-03", title: "Electricity Bill",    group: "Household",      totalAmount: 89.00,  yourShare: 44.50,  partnerShare: 44.50,  paidBy: "partner", status: "pending"  },
-  { id: "s4",  date: "2024-03-02", title: "Lunch Order",         group: "Office Lunch",   totalAmount: 78.50,  yourShare: 19.63,  partnerShare: 19.63,  paidBy: "you",     status: "settled"  },
-  { id: "s5",  date: "2024-03-01", title: "Museum Tickets",      group: "Trip to Paris",  totalAmount: 120.00, yourShare: 40.00,  partnerShare: 40.00,  paidBy: "partner", status: "pending"  },
-  { id: "s6",  date: "2024-02-26", title: "Supermarket",         group: "Household",      totalAmount: 98.20,  yourShare: 49.10,  partnerShare: 49.10,  paidBy: "you",     status: "settled"  },
-  { id: "s7",  date: "2024-02-22", title: "Gas Bill",            group: "Household",      totalAmount: 62.40,  yourShare: 31.20,  partnerShare: 31.20,  paidBy: "partner", status: "settled"  },
-  { id: "s8",  date: "2024-02-18", title: "Flight Booking",      group: "Trip to Paris",  totalAmount: 540.00, yourShare: 270.00, partnerShare: 270.00, paidBy: "you",     status: "settled"  },
-  { id: "s9",  date: "2024-02-15", title: "Hotel Deposit",       group: "Trip to Paris",  totalAmount: 300.00, yourShare: 150.00, partnerShare: 150.00, paidBy: "partner", status: "settled"  },
-  { id: "s10", date: "2024-02-10", title: "Weekly Groceries",    group: "Household",      totalAmount: 112.60, yourShare: 56.30,  partnerShare: 56.30,  paidBy: "you",     status: "settled"  },
-  { id: "s11", date: "2024-02-05", title: "Internet Bill",       group: "Household",      totalAmount: 55.00,  yourShare: 27.50,  partnerShare: 27.50,  paidBy: "partner", status: "settled"  },
-  { id: "s12", date: "2024-01-28", title: "New Year Dinner",     group: "Office Lunch",   totalAmount: 189.00, yourShare: 47.25,  partnerShare: 47.25,  paidBy: "you",     status: "settled"  },
-  { id: "s13", date: "2024-01-20", title: "Streaming Services",  group: "Household",      totalAmount: 45.97,  yourShare: 22.99,  partnerShare: 22.98,  paidBy: "you",     status: "settled"  },
-  { id: "s14", date: "2024-01-15", title: "Rent Contribution",   group: "Household",      totalAmount: 800.00, yourShare: 400.00, partnerShare: 400.00, paidBy: "partner", status: "settled"  },
-  { id: "s15", date: "2024-01-10", title: "Gym Membership",      group: "Household",      totalAmount: 80.00,  yourShare: 40.00,  partnerShare: 40.00,  paidBy: "you",     status: "settled"  },
-]
-
 const monthlyTrendData = [
   { month: "Oct", total: 420, yourShare: 210, partnerShare: 210 },
   { month: "Nov", total: 680, yourShare: 340, partnerShare: 340 },
@@ -239,18 +222,50 @@ function pct(current: number, previous: number): { value: string; up: boolean } 
   return { value: `${Math.abs(diff).toFixed(1)}%`, up: diff >= 0 }
 }
 
+function apiToSplitTxn(t: ApiTransaction): SplitTxn | null {
+  if (t.splits.length === 0) return null
+  const bhargavSplit = t.splits.find((s) => s.profile?.name === "Bhargav")
+  const partnerSplit = t.splits.find((s) => s.profile?.name !== "Bhargav")
+  if (!bhargavSplit) return null
+  const paidBy: "you" | "partner" =
+    bhargavSplit.paid_amount > 0 ? "you" : "partner"
+  return {
+    id: t.id,
+    date: t.occurred_at.slice(0, 10),
+    title: t.title,
+    group: t.category?.name ?? "Household",
+    totalAmount: t.amount,
+    yourShare: bhargavSplit.share_amount,
+    partnerShare: partnerSplit?.share_amount ?? 0,
+    paidBy,
+    status: t.status === "cleared" ? "settled" : "pending",
+  }
+}
+
 function AnalyticsTab() {
   const defaultRange = DATE_RANGE_PRESETS[2].getRange() // Last 30 days
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange)
   const [sortField, setSortField] = useState<"date" | "amount">("date")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
+  const [allSplitTxns, setAllSplitTxns] = useState<SplitTxn[]>([])
+
+  useEffect(() => {
+    fetchTransactions({ limit: 500, offset: 0 })
+      .then((res) => {
+        const splitTxns = res.items
+          .map(apiToSplitTxn)
+          .filter((t): t is SplitTxn => t !== null)
+        setAllSplitTxns(splitTxns)
+      })
+      .catch(console.error)
+  }, [])
 
   const filtered = useMemo(() => {
-    if (!dateRange.from || !dateRange.to) return ALL_SPLIT_TXNS
-    return ALL_SPLIT_TXNS.filter((t) =>
+    if (!dateRange.from || !dateRange.to) return allSplitTxns
+    return allSplitTxns.filter((t) =>
       isWithinInterval(parseISO(t.date), { start: dateRange.from!, end: dateRange.to! })
     )
-  }, [dateRange])
+  }, [dateRange, allSplitTxns])
 
   const summary = useMemo(() => {
     const total = filtered.reduce((s, t) => s + t.totalAmount, 0)
@@ -532,9 +547,17 @@ function AnalyticsTab() {
 export default function SharedExpensesPage() {
   const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
   const [isAddGroupOpen, setIsAddGroupOpen] = useState(false)
+  const [splitSummary, setSplitSummary] = useState<SplitSummary | null>(null)
 
-  const totalOwed = balances.filter((b) => !b.owes).reduce((acc, b) => acc + b.amount, 0)
-  const totalOwing = balances.filter((b) => b.owes).reduce((acc, b) => acc + b.amount, 0)
+  useEffect(() => {
+    fetchSplitSummary().then(setSplitSummary).catch(console.error)
+  }, [])
+
+  // net_balance > 0 means partner owes you (you are owed)
+  // net_balance < 0 means you owe partner
+  const netBalance = splitSummary?.net_balance ?? 0
+  const totalOwed = netBalance > 0 ? netBalance : 0
+  const totalOwing = netBalance < 0 ? Math.abs(netBalance) : 0
 
   return (
     <div className="space-y-6">

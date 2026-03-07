@@ -1,0 +1,111 @@
+table_name,column_name,data_type
+accounts,id,uuid
+accounts,household_id,uuid
+accounts,name,text
+accounts,type,USER-DEFINED
+accounts,currency,text
+accounts,balance,numeric
+accounts,external_id,text
+accounts,last_synced_at,timestamp with time zone
+accounts,created_at,timestamp with time zone
+audit_logs,id,uuid
+audit_logs,user_id,uuid
+audit_logs,action,text
+audit_logs,resource_type,text
+audit_logs,resource_id,uuid
+audit_logs,details,jsonb
+audit_logs,created_at,timestamp with time zone
+budgets,id,uuid
+budgets,household_id,uuid
+budgets,name,text
+budgets,category_id,uuid
+budgets,amount,numeric
+budgets,period_type,text
+budgets,carry_over,boolean
+budgets,start_date,date
+budgets,created_at,timestamp with time zone
+categories,id,uuid
+categories,household_id,uuid
+categories,name,text
+categories,parent_id,uuid
+categories,is_income,boolean
+categories,created_at,timestamp with time zone
+households,id,uuid
+households,name,text
+households,owner_user_id,uuid
+households,created_at,timestamp with time zone
+investment_transactions,id,uuid
+investment_transactions,investment_id,uuid
+investment_transactions,txn_type,text
+investment_transactions,units,numeric
+investment_transactions,price_per_unit,numeric
+investment_transactions,fees,numeric
+investment_transactions,currency,text
+investment_transactions,occurred_at,timestamp with time zone
+investment_transactions,created_at,timestamp with time zone
+investments,id,uuid
+investments,household_id,uuid
+investments,name,text
+investments,instrument,USER-DEFINED
+investments,account_id,uuid
+investments,created_at,timestamp with time zone
+profiles,id,uuid
+profiles,household_id,uuid
+profiles,name,text
+profiles,email,text
+profiles,avatar_url,text
+profiles,default_share,numeric
+profiles,created_at,timestamp with time zone
+recurring_rules,id,uuid
+recurring_rules,household_id,uuid
+recurring_rules,created_by_profile_id,uuid
+recurring_rules,template_txn,jsonb
+recurring_rules,freq,USER-DEFINED
+recurring_rules,cron_expr,text
+recurring_rules,next_run_at,timestamp with time zone
+recurring_rules,is_active,boolean
+recurring_rules,created_at,timestamp with time zone
+settlements,id,uuid
+settlements,household_id,uuid
+settlements,from_profile_id,uuid
+settlements,to_profile_id,uuid
+settlements,amount,numeric
+settlements,method,text
+settlements,note,text
+settlements,occurred_at,timestamp with time zone
+settlements,created_at,timestamp with time zone
+tags,id,uuid
+tags,household_id,uuid
+tags,name,text
+transaction_splits,id,uuid
+transaction_splits,transaction_id,uuid
+transaction_splits,profile_id,uuid
+transaction_splits,share_amount,numeric
+transaction_splits,share_percent,numeric
+transaction_splits,paid_amount,numeric
+transaction_splits,created_at,timestamp with time zone
+transaction_tags,transaction_id,uuid
+transaction_tags,tag_id,uuid
+transactions,id,uuid
+transactions,household_id,uuid
+transactions,created_by_profile_id,uuid
+transactions,account_id,uuid
+transactions,title,text
+transactions,merchant,text
+transactions,description,text
+transactions,amount,numeric
+transactions,currency,text
+transactions,type,USER-DEFINED
+transactions,category_id,uuid
+transactions,occurred_at,timestamp with time zone
+transactions,status,text
+transactions,is_recurring_instance,boolean
+transactions,recurring_rule_id,uuid
+transactions,imported_from,text
+transactions,receipt_url,text
+transactions,transfer_group_id,uuid
+transactions,created_at,timestamp with time zone
+users,id,uuid
+users,email,text
+users,name,text
+users,created_at,timestamp with time zone

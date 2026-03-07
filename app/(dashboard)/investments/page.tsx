@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useState } from "react"
+import { fetchInvestments, type Investment } from "@/lib/api"
 import { TrendingUp, TrendingDown, Plus, MoreHorizontal, ArrowUpRight } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -52,104 +54,37 @@ const allocationData = [
   { name: "Gold", value: 3000, color: "var(--muted)" },
 ]
 
-const holdings = [
-  {
-    id: "1",
-    name: "Apple Inc.",
-    symbol: "AAPL",
-    type: "Stock",
-    units: 50,
-    avgPrice: 145.0,
-    currentPrice: 182.52,
-    value: 9126,
-    gain: 1876,
-    gainPercent: 25.88,
-  },
-  {
-    id: "2",
-    name: "Vanguard S&P 500",
-    symbol: "VOO",
-    type: "ETF",
-    units: 25,
-    avgPrice: 380.0,
-    currentPrice: 425.5,
-    value: 10637.5,
-    gain: 1137.5,
-    gainPercent: 11.97,
-  },
-  {
-    id: "3",
-    name: "Microsoft Corp.",
-    symbol: "MSFT",
-    type: "Stock",
-    units: 30,
-    avgPrice: 280.0,
-    currentPrice: 378.91,
-    value: 11367.3,
-    gain: 2967.3,
-    gainPercent: 35.33,
-  },
-  {
-    id: "4",
-    name: "Tesla Inc.",
-    symbol: "TSLA",
-    type: "Stock",
-    units: 20,
-    avgPrice: 250.0,
-    currentPrice: 215.0,
-    value: 4300,
-    gain: -700,
-    gainPercent: -14.0,
-  },
-  {
-    id: "5",
-    name: "HDFC Balanced Advantage",
-    symbol: "HDFC-BAF",
-    type: "Mutual Fund",
-    units: 500,
-    avgPrice: 45.0,
-    currentPrice: 52.75,
-    value: 26375,
-    gain: 3875,
-    gainPercent: 17.22,
-  },
-  {
-    id: "6",
-    name: "Bitcoin",
-    symbol: "BTC",
-    type: "Crypto",
-    units: 0.15,
-    avgPrice: 35000,
-    currentPrice: 45000,
-    value: 6750,
-    gain: 1500,
-    gainPercent: 28.57,
-  },
-  {
-    id: "7",
-    name: "US Treasury Bond",
-    symbol: "GOVT",
-    type: "Bond",
-    units: 100,
-    avgPrice: 110.0,
-    currentPrice: 108.5,
-    value: 10850,
-    gain: -150,
-    gainPercent: -1.36,
-  },
-  {
-    id: "8",
-    name: "Amazon.com Inc.",
-    symbol: "AMZN",
-    type: "Stock",
-    units: 40,
-    avgPrice: 130.0,
-    currentPrice: 175.35,
-    value: 7014,
-    gain: 1814,
-    gainPercent: 34.88,
-  },
-]
+type Holding = {
+  id: string
+  name: string
+  symbol: string
+  type: string
+  units: number
+  avgPrice: number
+  currentPrice: number
+  value: number
+  gain: number
+  gainPercent: number
+}
+
+function apiToHolding(inv: Investment): Holding {
+  const lastTxn = inv.investment_transactions[inv.investment_transactions.length - 1]
+  const units = lastTxn?.units ?? 0
+  const price = lastTxn?.price_per_unit ?? 0
+  const value = units * price
+  return {
+    id: inv.id,
+    name: inv.name,
+    symbol: inv.instrument ?? "—",
+    type: inv.instrument ?? "—",
+    units,
+    avgPrice: price,
+    currentPrice: price,
+    value,
+    gain: 0,
+    gainPercent: 0,
+  }
+}
 
 const chartConfig = {
   value: {
@@ -159,9 +94,17 @@ const chartConfig = {
 } satisfies ChartConfig
 
 export default function InvestmentsPage() {
+  const [holdings, setHoldings] = useState<Holding[]>([])
+
+  useEffect(() => {
+    fetchInvestments()
+      .then((data) => setHoldings(data.map(apiToHolding)))
+      .catch(console.error)
+  }, [])
+
   const totalValue = holdings.reduce((acc, h) => acc + h.value, 0)
   const totalGain = holdings.reduce((acc, h) => acc + h.gain, 0)
-  const totalGainPercent = (totalGain / (totalValue - totalGain)) * 100
+  const totalGainPercent = totalValue > totalGain ? (totalGain / (totalValue - totalGain)) * 100 : 0
 
   return (
     <div className="space-y-6">

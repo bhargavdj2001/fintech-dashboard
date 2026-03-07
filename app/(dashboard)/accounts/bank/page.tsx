@@ -1,6 +1,6 @@
 "use client"
 
-import { useState } from "react"
+import { useEffect, useState } from "react"
 import Link from "next/link"
 import {
   Building2,
@@ -15,7 +15,8 @@ import {
   ArrowDownLeft,
   ArrowUpRight,
 } from "lucide-react"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
+import { fetchAccounts, type Account as ApiAccount } from "@/lib/api"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter, CardAction } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
@@ -29,96 +30,68 @@ import {
 import { Area, AreaChart, XAxis, YAxis } from "recharts"
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 
-const bankAccounts = [
-  {
-    id: "1",
-    name: "Primary Checking",
-    institution: "Chase Bank",
-    type: "checking",
-    balance: 12450.75,
-    lastSync: "2 min ago",
-    accountNumber: "****4521",
-    icon: Building2,
-    change: 2.5,
-    color: "text-chart-1",
-    bgColor: "bg-chart-1",
-    history: [
-      { month: "Oct", balance: 10200 },
-      { month: "Nov", balance: 11000 },
-      { month: "Dec", balance: 10500 },
-      { month: "Jan", balance: 11800 },
-      { month: "Feb", balance: 12100 },
-      { month: "Mar", balance: 12450 },
-    ],
-    recentTransactions: [
-      { id: "1", title: "Salary Deposit", amount: 5200, date: "Mar 1", type: "income" },
-      { id: "2", title: "Rent Payment", amount: -2200, date: "Mar 1", type: "expense" },
-      { id: "3", title: "Savings Transfer", amount: -500, date: "Mar 1", type: "transfer" },
-      { id: "4", title: "Electric Bill", amount: -89, date: "Mar 4", type: "expense" },
-    ],
-  },
-  {
-    id: "2",
-    name: "High Yield Savings",
-    institution: "Marcus",
-    type: "savings",
-    balance: 45200.0,
-    lastSync: "5 min ago",
-    accountNumber: "****8892",
-    icon: PiggyBank,
-    change: 1.8,
-    color: "text-chart-2",
-    bgColor: "bg-chart-2",
-    history: [
-      { month: "Oct", balance: 41000 },
-      { month: "Nov", balance: 42000 },
-      { month: "Dec", balance: 43200 },
-      { month: "Jan", balance: 44000 },
-      { month: "Feb", balance: 44800 },
-      { month: "Mar", balance: 45200 },
-    ],
-    recentTransactions: [
-      { id: "5", title: "Transfer from Checking", amount: 500, date: "Mar 1", type: "income" },
-      { id: "6", title: "Interest Earned", amount: 125.5, date: "Mar 1", type: "income" },
-    ],
-  },
-  {
-    id: "3",
-    name: "Business Checking",
-    institution: "Bank of America",
-    type: "checking",
-    balance: 8750.25,
-    lastSync: "1 hour ago",
-    accountNumber: "****3341",
-    icon: Building2,
-    change: -3.2,
-    color: "text-chart-3",
-    bgColor: "bg-chart-3",
-    history: [
-      { month: "Oct", balance: 9500 },
-      { month: "Nov", balance: 10200 },
-      { month: "Dec", balance: 9800 },
-      { month: "Jan", balance: 8900 },
-      { month: "Feb", balance: 9100 },
-      { month: "Mar", balance: 8750 },
-    ],
-    recentTransactions: [
-      { id: "7", title: "Client Payment", amount: 1500, date: "Mar 5", type: "income" },
-      { id: "8", title: "AWS Invoice", amount: -45, date: "Mar 3", type: "expense" },
-      { id: "9", title: "Software License", amount: -299, date: "Mar 2", type: "expense" },
-    ],
-  },
+const COLORS = [
+  { color: "text-chart-1", bgColor: "bg-chart-1" },
+  { color: "text-chart-2", bgColor: "bg-chart-2" },
+  { color: "text-chart-3", bgColor: "bg-chart-3" },
+  { color: "text-chart-4", bgColor: "bg-chart-4" },
+  { color: "text-chart-5", bgColor: "bg-chart-5" },
 ]
+
+type BankAccount = {
+  id: string
+  name: string
+  institution: string
+  type: string
+  balance: number
+  lastSync: string
+  accountNumber: string
+  icon: typeof Building2
+  change: number
+  color: string
+  bgColor: string
+  history: { month: string; balance: number }[]
+  recentTransactions: { id: string; title: string; amount: number; date: string; type: string }[]
+}
+
+function apiToBank(a: ApiAccount, idx: number): BankAccount {
+  return {
+    id: a.id,
+    name: a.name,
+    institution: a.external_id ? `ID: ${a.external_id}` : a.type,
+    type: a.type,
+    balance: a.balance,
+    lastSync: a.last_synced_at ? new Date(a.last_synced_at).toLocaleString() : "—",
+    accountNumber: "****",
+    icon: a.type === "savings" ? PiggyBank : Building2,
+    change: 0,
+    color: COLORS[idx % COLORS.length].color,
+    bgColor: COLORS[idx % COLORS.length].bgColor,
+    history: [],
+    recentTransactions: [],
+  }
+}
 
 const chartConfig = {
   balance: {
     label: "Balance",
     color: "var(--chart-1)",
   },
-} satisfies ChartConfig
+} satisfies ChartConfig;
 
 export default function BankAccountsPage() {
-  const [selectedAccount, setSelectedAccount] = useState(bankAccounts[0])
+  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
+  const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null)
+
+  useEffect(() => {
+    fetchAccounts()
+      .then((data) => {
+        const mapped = data.map(apiToBank)
+        setBankAccounts(mapped)
+        if (mapped.length > 0) setSelectedAccount(mapped[0])
+      })
+      .catch(console.error)
+  }, [])
 
   const totalBalance = bankAccounts.reduce((acc, a) => acc + a.balance, 0)
 
@@ -159,7 +132,7 @@ export default function BankAccountsPage() {
             <Card
               key={account.id}
               className={`cursor-pointer transition-all hover:bg-muted/30 ${
-                selectedAccount.id === account.id ? "ring-2 ring-primary" : ""
+                selectedAccount?.id === account.id ? "ring-2 ring-primary" : ""
               }`}
               onClick={() => setSelectedAccount(account)}
             >
@@ -223,112 +196,122 @@ export default function BankAccountsPage() {
         </div>
 
         <div className="lg:col-span-2 space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">{selectedAccount.name}</CardTitle>
-                  <CardDescription>Balance history — last 6 months</CardDescription>
-                </div>
-                <div className="flex items-center gap-2">
-                  <Button variant="outline" size="sm">
-                    <ArrowRightLeft className="mr-2 h-4 w-4" />
-                    Transfer
-                  </Button>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer config={chartConfig} className="h-[220px] w-full">
-                <AreaChart
-                  data={selectedAccount.history}
-                  margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
-                >
-                  <defs>
-                    <linearGradient id="fillBankBalance" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-balance)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--color-balance)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis
-                    dataKey="month"
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    fontSize={12}
-                  />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    tickMargin={8}
-                    fontSize={12}
-                    tickFormatter={(value) => `$${value / 1000}k`}
-                  />
-                  <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-                  <Area
-                    type="monotone"
-                    dataKey="balance"
-                    stroke="var(--color-balance)"
-                    strokeWidth={2}
-                    fill="url(#fillBankBalance)"
-                  />
-                </AreaChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
-
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Recent Transactions</CardTitle>
-              <CardDescription>{selectedAccount.name} · last 30 days</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-2">
-              {selectedAccount.recentTransactions.map((txn) => (
-                <div
-                  key={txn.id}
-                  className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
-                >
-                  <div className="flex items-center gap-3">
-                    <div
-                      className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                        txn.type === "income"
-                          ? "bg-success/10"
-                          : txn.type === "transfer"
-                          ? "bg-primary/10"
-                          : "bg-destructive/10"
-                      }`}
-                    >
-                      {txn.type === "income" ? (
-                        <ArrowDownLeft className="h-4 w-4 text-success" />
-                      ) : txn.type === "transfer" ? (
-                        <ArrowRightLeft className="h-4 w-4 text-primary" />
-                      ) : (
-                        <ArrowUpRight className="h-4 w-4 text-destructive" />
-                      )}
-                    </div>
+          {!selectedAccount ? (
+            <p className="py-12 text-center text-sm text-muted-foreground">Select an account to view details.</p>
+          ) : (
+            <>
+              <Card>
+                <CardHeader>
+                  <div className="flex items-center justify-between">
                     <div>
-                      <p className="text-sm font-medium text-foreground">{txn.title}</p>
-                      <p className="text-xs text-muted-foreground">{txn.date}</p>
+                      <CardTitle className="text-base font-semibold">{selectedAccount.name}</CardTitle>
+                      <CardDescription>Balance history — last 6 months</CardDescription>
+                    </div>
+                    <div className="flex items-center gap-2">
+                      <Button variant="outline" size="sm">
+                        <ArrowRightLeft className="mr-2 h-4 w-4" />
+                        Transfer
+                      </Button>
                     </div>
                   </div>
-                  <span
-                    className={`text-sm font-semibold tabular-nums ${
-                      txn.amount > 0 ? "text-success" : "text-foreground"
-                    }`}
-                  >
-                    {txn.amount > 0 ? "+" : ""}${Math.abs(txn.amount).toLocaleString()}
-                  </span>
-                </div>
-              ))}
-              <div className="pt-2">
-                <Link href="/transactions">
-                  <Button variant="outline" className="w-full">
-                    View All Transactions
-                  </Button>
-                </Link>
-              </div>
-            </CardContent>
-          </Card>
+                </CardHeader>
+                <CardContent>
+                  <ChartContainer config={chartConfig} className="h-55 w-full">
+                    <AreaChart
+                      data={selectedAccount.history}
+                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                    >
+                      <defs>
+                        <linearGradient id="fillBankBalance" x1="0" y1="0" x2="0" y2="1">
+                          <stop offset="5%" stopColor="var(--color-balance)" stopOpacity={0.3} />
+                          <stop offset="95%" stopColor="var(--color-balance)" stopOpacity={0} />
+                        </linearGradient>
+                      </defs>
+                      <XAxis
+                        dataKey="month"
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        fontSize={12}
+                      />
+                      <YAxis
+                        tickLine={false}
+                        axisLine={false}
+                        tickMargin={8}
+                        fontSize={12}
+                        tickFormatter={(value) => `$${value / 1000}k`}
+                      />
+                      <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                      <Area
+                        type="monotone"
+                        dataKey="balance"
+                        stroke="var(--color-balance)"
+                        strokeWidth={2}
+                        fill="url(#fillBankBalance)"
+                      />
+                    </AreaChart>
+                  </ChartContainer>
+                </CardContent>
+              </Card>
+
+              <Card>
+                <CardHeader>
+                  <CardTitle className="text-base font-semibold">Recent Transactions</CardTitle>
+                  <CardDescription>{selectedAccount.name} · last 30 days</CardDescription>
+                </CardHeader>
+                <CardContent className="space-y-2">
+                  {selectedAccount.recentTransactions.length === 0 ? (
+                    <p className="py-4 text-center text-sm text-muted-foreground">No recent transactions.</p>
+                  ) : (
+                    selectedAccount.recentTransactions.map((txn) => (
+                      <div
+                        key={txn.id}
+                        className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
+                      >
+                        <div className="flex items-center gap-3">
+                          <div
+                            className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                              txn.type === "income"
+                                ? "bg-success/10"
+                                : txn.type === "transfer"
+                                ? "bg-primary/10"
+                                : "bg-destructive/10"
+                            }`}
+                          >
+                            {txn.type === "income" ? (
+                              <ArrowDownLeft className="h-4 w-4 text-success" />
+                            ) : txn.type === "transfer" ? (
+                              <ArrowRightLeft className="h-4 w-4 text-primary" />
+                            ) : (
+                              <ArrowUpRight className="h-4 w-4 text-destructive" />
+                            )}
+                          </div>
+                          <div>
+                            <p className="text-sm font-medium text-foreground">{txn.title}</p>
+                            <p className="text-xs text-muted-foreground">{txn.date}</p>
+                          </div>
+                        </div>
+                        <span
+                          className={`text-sm font-semibold tabular-nums ${
+                            txn.amount > 0 ? "text-success" : "text-foreground"
+                          }`}
+                        >
+                          {txn.amount > 0 ? "+" : ""}${Math.abs(txn.amount).toLocaleString()}
+                        </span>
+                      </div>
+                    ))
+                  )}
+                  <div className="pt-2">
+                    <Link href="/transactions">
+                      <Button variant="outline" className="w-full">
+                        View All Transactions
+                      </Button>
+                    </Link>
+                  </div>
+                </CardContent>
+              </Card>
+            </>
+          )}
         </div>
       </div>
     </div>

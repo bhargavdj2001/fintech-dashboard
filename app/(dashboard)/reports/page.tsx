@@ -1,6 +1,7 @@
 "use client"
 
-import { useState, useMemo } from "react"
+import { useState, useMemo, useEffect } from "react"
+import { fetchPeriodReport, type Transaction as ApiTransaction } from "@/lib/api"
 import {
   Download,
   FileText,
@@ -142,7 +143,7 @@ const accountSummary = [
   { name: "Investment", balance: 156750, change: 8.5 },
 ]
 
-// ─── Period Analysis mock data ────────────────────────────────────────────────
+// ─── Period Analysis types ────────────────────────────────────────────────────
 
 type TxnType = "income" | "expense" | "transfer"
 type TxnStatus = "posted" | "pending"
@@ -160,29 +161,6 @@ interface PeriodTxn {
   status: TxnStatus
   isSplit: boolean
 }
-
-const ALL_TRANSACTIONS: PeriodTxn[] = [
-  { id: "T001", date: "2024-03-01", title: "Salary Deposit", merchant: "Acme Corp", account: "Checking", category: "Income", tags: ["salary"], amount: 5200, type: "income", status: "posted", isSplit: false },
-  { id: "T002", date: "2024-03-03", title: "Grocery Shopping", merchant: "Whole Foods", account: "Credit Card", category: "Food & Dining", tags: ["groceries"], amount: -127.45, type: "expense", status: "posted", isSplit: false },
-  { id: "T003", date: "2024-03-04", title: "Electric Bill", merchant: "City Power", account: "Checking", category: "Utilities", tags: ["utilities", "recurring"], amount: -89, type: "expense", status: "posted", isSplit: true },
-  { id: "T004", date: "2024-03-05", title: "Freelance Payment", merchant: "Client XYZ", account: "Checking", category: "Income", tags: ["freelance"], amount: 850, type: "income", status: "posted", isSplit: false },
-  { id: "T005", date: "2024-03-05", title: "Restaurant Dinner", merchant: "The Italian Place", account: "Credit Card", category: "Food & Dining", tags: ["dining"], amount: -64.5, type: "expense", status: "posted", isSplit: true },
-  { id: "T006", date: "2024-03-06", title: "Netflix", merchant: "Netflix", account: "Credit Card", category: "Entertainment", tags: ["subscription"], amount: -15.99, type: "expense", status: "posted", isSplit: false },
-  { id: "T007", date: "2024-03-06", title: "Gas Station", merchant: "Shell", account: "Debit Card", category: "Transportation", tags: ["fuel"], amount: -45, type: "expense", status: "posted", isSplit: false },
-  { id: "T008", date: "2024-03-07", title: "Investment Transfer", merchant: "Vanguard", account: "Checking", category: "Transfer", tags: ["investment"], amount: -500, type: "transfer", status: "pending", isSplit: false },
-  { id: "T009", date: "2024-03-07", title: "Coffee", merchant: "Starbucks", account: "Debit Card", category: "Food & Dining", tags: ["coffee"], amount: -5.75, type: "expense", status: "posted", isSplit: false },
-  { id: "T010", date: "2024-03-08", title: "Phone Bill", merchant: "Verizon", account: "Credit Card", category: "Utilities", tags: ["utilities"], amount: -65, type: "expense", status: "pending", isSplit: false },
-  { id: "T011", date: "2024-03-10", title: "Grocery Shopping", merchant: "Trader Joe's", account: "Credit Card", category: "Food & Dining", tags: ["groceries"], amount: -98.3, type: "expense", status: "posted", isSplit: false },
-  { id: "T012", date: "2024-03-12", title: "Gym Membership", merchant: "24 Hour Fitness", account: "Credit Card", category: "Healthcare", tags: ["health", "recurring"], amount: -49, type: "expense", status: "posted", isSplit: false },
-  { id: "T013", date: "2024-03-14", title: "Amazon Purchase", merchant: "Amazon", account: "Credit Card", category: "Shopping", tags: ["shopping"], amount: -134.99, type: "expense", status: "posted", isSplit: false },
-  { id: "T014", date: "2024-03-15", title: "Rent Payment", merchant: "Oakwood Apartments", account: "Checking", category: "Housing", tags: ["rent", "recurring"], amount: -2200, type: "expense", status: "posted", isSplit: true },
-  { id: "T015", date: "2024-03-18", title: "Freelance Invoice", merchant: "Client ABC", account: "Checking", category: "Income", tags: ["freelance"], amount: 1500, type: "income", status: "posted", isSplit: false },
-  { id: "T016", date: "2024-02-01", title: "Salary Deposit", merchant: "Acme Corp", account: "Checking", category: "Income", tags: ["salary"], amount: 5200, type: "income", status: "posted", isSplit: false },
-  { id: "T017", date: "2024-02-03", title: "Grocery Shopping", merchant: "Whole Foods", account: "Credit Card", category: "Food & Dining", tags: ["groceries"], amount: -112.6, type: "expense", status: "posted", isSplit: false },
-  { id: "T018", date: "2024-02-08", title: "Electric Bill", merchant: "City Power", account: "Checking", category: "Utilities", tags: ["utilities"], amount: -78, type: "expense", status: "posted", isSplit: true },
-  { id: "T019", date: "2024-02-15", title: "Rent Payment", merchant: "Oakwood Apartments", account: "Checking", category: "Housing", tags: ["rent"], amount: -2200, type: "expense", status: "posted", isSplit: true },
-  { id: "T020", date: "2024-02-20", title: "Spotify", merchant: "Spotify", account: "Credit Card", category: "Entertainment", tags: ["subscription"], amount: -9.99, type: "expense", status: "posted", isSplit: false },
-]
 
 const accountSpendData = [
   { account: "Checking", amount: 2854, color: "var(--chart-1)" },
@@ -251,25 +229,45 @@ function pct(current: number, previous: number) {
 
 // ─── Period Analysis tab ──────────────────────────────────────────────────────
 
+function apiTxnToPeriod(t: ApiTransaction): PeriodTxn {
+  return {
+    id: t.id,
+    date: t.occurred_at.slice(0, 10),
+    title: t.title,
+    merchant: t.merchant ?? t.account?.name ?? "—",
+    account: t.account?.name ?? "—",
+    category: t.category?.name ?? "Uncategorized",
+    tags: [],
+    amount: t.type === "income" ? t.amount : -Math.abs(t.amount),
+    type: t.type as TxnType,
+    status: (t.status === "cleared" ? "posted" : t.status ?? "posted") as TxnStatus,
+    isSplit: t.splits.length > 0,
+  }
+}
+
 function PeriodAnalysisTab() {
   const defaultRange: DateRange = {
-    from: startOfMonth(new Date("2024-03-01")),
-    to: endOfMonth(new Date("2024-03-01")),
+    from: startOfMonth(new Date()),
+    to: new Date(),
   }
 
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange)
+  const [apiTxns, setApiTxns] = useState<PeriodTxn[]>([])
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
   const [sortField, setSortField] = useState<"date" | "amount">("date")
   const [sortDir, setSortDir] = useState<"asc" | "desc">("desc")
 
-  const periodTxns = useMemo(() => {
-    if (!dateRange.from || !dateRange.to) return ALL_TRANSACTIONS
-    return ALL_TRANSACTIONS.filter((t) => {
-      const d = parseISO(t.date)
-      return isWithinInterval(d, { start: dateRange.from!, end: dateRange.to! })
-    })
+  useEffect(() => {
+    const params: { start_date?: string; end_date?: string } = {}
+    if (dateRange.from) params.start_date = dateRange.from.toISOString()
+    if (dateRange.to) params.end_date = dateRange.to.toISOString()
+    fetchPeriodReport(params)
+      .then((report) => setApiTxns(report.transactions.map(apiTxnToPeriod)))
+      .catch(console.error)
   }, [dateRange])
+
+  const periodTxns = apiTxns
 
   const summary = useMemo(() => {
     const income = periodTxns.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0)

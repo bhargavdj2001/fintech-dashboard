@@ -1,20 +1,27 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import {
+  fetchRecurringRules,
+  fetchAccounts,
+  fetchCategories,
+  fetchHouseholdId,
+  createRecurringRule,
+  updateRecurringRule,
+  deleteRecurringRule,
+  type RecurringRule,
+  type Account,
+  type Category,
+} from "@/lib/api"
 import {
   Plus,
   Repeat,
-  Calendar,
   TrendingUp,
   TrendingDown,
   MoreHorizontal,
-  Edit,
   Trash2,
-  Pause,
-  Play,
   AlertCircle,
   CheckCircle2,
-  Clock,
   ArrowDownLeft,
   ArrowUpRight,
 } from "lucide-react"
@@ -37,7 +44,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -51,243 +57,342 @@ import {
 import { Bar, BarChart, XAxis, YAxis } from "recharts"
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 
-const recurringTransactions = {
-  income: [
-    {
-      id: "1",
-      name: "Salary",
-      amount: 5200,
-      frequency: "Monthly",
-      nextDate: "Apr 1, 2024",
-      category: "Income",
-      account: "Primary Checking",
-      status: "active",
-      merchant: "Acme Corp",
-    },
-    {
-      id: "2",
-      name: "Freelance Retainer",
-      amount: 1500,
-      frequency: "Monthly",
-      nextDate: "Apr 5, 2024",
-      category: "Income",
-      account: "Business Checking",
-      status: "active",
-      merchant: "Client ABC",
-    },
-    {
-      id: "3",
-      name: "Dividend Income",
-      amount: 125,
-      frequency: "Quarterly",
-      nextDate: "Jun 15, 2024",
-      category: "Investment Income",
-      account: "Brokerage",
-      status: "active",
-      merchant: "Vanguard",
-    },
-  ],
-  bills: [
-    {
-      id: "4",
-      name: "Rent",
-      amount: 2200,
-      frequency: "Monthly",
-      nextDate: "Apr 1, 2024",
-      category: "Housing",
-      account: "Primary Checking",
-      status: "active",
-      merchant: "Oakwood Apartments",
-    },
-    {
-      id: "5",
-      name: "Electric Bill",
-      amount: 120,
-      frequency: "Monthly",
-      nextDate: "Mar 25, 2024",
-      category: "Utilities",
-      account: "Primary Checking",
-      status: "active",
-      merchant: "City Power",
-    },
-    {
-      id: "6",
-      name: "Internet",
-      amount: 79,
-      frequency: "Monthly",
-      nextDate: "Mar 18, 2024",
-      category: "Utilities",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Comcast",
-    },
-    {
-      id: "7",
-      name: "Car Insurance",
-      amount: 145,
-      frequency: "Monthly",
-      nextDate: "Mar 20, 2024",
-      category: "Insurance",
-      account: "Primary Checking",
-      status: "active",
-      merchant: "Geico",
-    },
-    {
-      id: "8",
-      name: "Phone Bill",
-      amount: 85,
-      frequency: "Monthly",
-      nextDate: "Mar 22, 2024",
-      category: "Utilities",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Verizon",
-    },
-  ],
-  subscriptions: [
-    {
-      id: "9",
-      name: "Netflix",
-      amount: 15.99,
-      frequency: "Monthly",
-      nextDate: "Mar 15, 2024",
-      category: "Entertainment",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Netflix",
-    },
-    {
-      id: "10",
-      name: "Spotify",
-      amount: 9.99,
-      frequency: "Monthly",
-      nextDate: "Mar 18, 2024",
-      category: "Entertainment",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Spotify",
-    },
-    {
-      id: "11",
-      name: "Adobe Creative Cloud",
-      amount: 54.99,
-      frequency: "Monthly",
-      nextDate: "Mar 22, 2024",
-      category: "Software",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Adobe",
-    },
-    {
-      id: "12",
-      name: "Gym Membership",
-      amount: 49,
-      frequency: "Monthly",
-      nextDate: "Apr 1, 2024",
-      category: "Health",
-      account: "Credit Card",
-      status: "active",
-      merchant: "24 Hour Fitness",
-    },
-    {
-      id: "13",
-      name: "iCloud Storage",
-      amount: 2.99,
-      frequency: "Monthly",
-      nextDate: "Mar 25, 2024",
-      category: "Storage",
-      account: "Credit Card",
-      status: "active",
-      merchant: "Apple",
-    },
-    {
-      id: "14",
-      name: "AWS",
-      amount: 45,
-      frequency: "Monthly",
-      nextDate: "Apr 3, 2024",
-      category: "Software",
-      account: "Business Checking",
-      status: "paused",
-      merchant: "Amazon",
-    },
-  ],
-  transfers: [
-    {
-      id: "15",
-      name: "Savings Transfer",
-      amount: 500,
-      frequency: "Monthly",
-      nextDate: "Apr 1, 2024",
-      category: "Transfer",
-      account: "Primary Checking",
-      destination: "High Yield Savings",
-      status: "active",
-    },
-    {
-      id: "16",
-      name: "Investment Contribution",
-      amount: 400,
-      frequency: "Monthly",
-      nextDate: "Apr 5, 2024",
-      category: "Transfer",
-      account: "Primary Checking",
-      destination: "Brokerage",
-      status: "active",
-    },
-    {
-      id: "17",
-      name: "401(k) Contribution",
-      amount: 750,
-      frequency: "Bi-weekly",
-      nextDate: "Mar 15, 2024",
-      category: "Retirement",
-      account: "Salary",
-      destination: "401(k)",
-      status: "active",
-    },
-  ],
+type RecurringItem = {
+  id: string
+  name: string
+  amount: number
+  frequency: string
+  nextDate: string
+  category: string
+  account: string
+  status: string
+  type: string
 }
 
-const monthlyForecast = [
-  { month: "Mar", income: 6825, expenses: 2916 },
-  { month: "Apr", income: 6825, expenses: 2916 },
-  { month: "May", income: 6825, expenses: 2916 },
-  { month: "Jun", income: 6950, expenses: 2916 },
-]
+type RecurringGroups = {
+  income: RecurringItem[]
+  bills: RecurringItem[]
+  subscriptions: RecurringItem[]
+  transfers: RecurringItem[]
+}
+
+const EMPTY_GROUPS: RecurringGroups = { income: [], bills: [], subscriptions: [], transfers: [] }
+
+function mapRule(rule: RecurringRule): RecurringItem {
+  const t = rule.template_txn as Record<string, unknown> | null
+  const type = (t?.type as string) ?? "expense"
+  return {
+    id: rule.id,
+    name: (t?.title as string) ?? "Recurring Rule",
+    amount: (t?.amount as number) ?? 0,
+    frequency: rule.freq ?? "monthly",
+    nextDate: rule.next_run_at
+      ? new Date(rule.next_run_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })
+      : "—",
+    category: (t?.category as string) ?? "—",
+    account: (t?.account as string) ?? "—",
+    status: rule.is_active ? "active" : "paused",
+    type,
+  }
+}
+
+function groupRules(rules: RecurringRule[]): RecurringGroups {
+  const groups: RecurringGroups = { income: [], bills: [], subscriptions: [], transfers: [] }
+  for (const rule of rules) {
+    const item = mapRule(rule)
+    if (item.type === "income") groups.income.push(item)
+    else if (item.type === "transfer") groups.transfers.push(item)
+    else groups.bills.push(item)
+  }
+  return groups
+}
 
 const chartConfig = {
-  income: {
-    label: "Income",
-    color: "var(--chart-2)",
-  },
-  expenses: {
-    label: "Expenses",
-    color: "var(--chart-4)",
-  },
+  income: { label: "Income", color: "var(--chart-2)" },
+  expenses: { label: "Expenses", color: "var(--chart-4)" },
 } satisfies ChartConfig
+
+function RecurringCard({
+  item,
+  onToggle,
+  onDelete,
+}: {
+  item: RecurringItem
+  onToggle: (id: string, active: boolean) => void
+  onDelete: (id: string) => void
+}) {
+  const isIncome = item.type === "income"
+  const isActive = item.status === "active"
+
+  return (
+    <div className="flex items-center justify-between rounded-lg border border-border p-4 hover:bg-muted/30 transition-colors">
+      <div className="flex items-center gap-4">
+        <div className={`flex h-10 w-10 items-center justify-center rounded-full ${
+          isIncome ? "bg-success/10" : item.type === "transfer" ? "bg-primary/10" : "bg-destructive/10"
+        }`}>
+          {isIncome ? (
+            <ArrowDownLeft className="h-5 w-5 text-success" />
+          ) : (
+            <ArrowUpRight className={`h-5 w-5 ${item.type === "transfer" ? "text-primary" : "text-destructive"}`} />
+          )}
+        </div>
+        <div>
+          <p className="font-medium text-foreground">{item.name}</p>
+          <p className="text-xs text-muted-foreground capitalize">
+            {item.frequency} · Next: {item.nextDate}
+          </p>
+        </div>
+      </div>
+
+      <div className="flex items-center gap-4">
+        <div className="text-right">
+          <p className={`font-semibold tabular-nums ${isIncome ? "text-success" : "text-foreground"}`}>
+            {isIncome ? "+" : "-"}${item.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+          </p>
+          <Badge
+            variant="secondary"
+            className={isActive ? "bg-success/10 text-success" : "bg-muted text-muted-foreground"}
+          >
+            {isActive ? <CheckCircle2 className="mr-1 h-3 w-3" /> : <AlertCircle className="mr-1 h-3 w-3" />}
+            {item.status}
+          </Badge>
+        </div>
+
+        <Switch
+          checked={isActive}
+          onCheckedChange={(checked) => onToggle(item.id, checked)}
+        />
+
+        <DropdownMenu>
+          <DropdownMenuTrigger asChild>
+            <Button variant="ghost" size="icon" className="h-8 w-8">
+              <MoreHorizontal className="h-4 w-4" />
+            </Button>
+          </DropdownMenuTrigger>
+          <DropdownMenuContent align="end">
+            <DropdownMenuItem onClick={() => onToggle(item.id, !isActive)}>
+              {isActive ? "Pause" : "Resume"}
+            </DropdownMenuItem>
+            <DropdownMenuSeparator />
+            <DropdownMenuItem
+              className="text-destructive"
+              onClick={() => onDelete(item.id)}
+            >
+              <Trash2 className="mr-2 h-4 w-4" />
+              Delete
+            </DropdownMenuItem>
+          </DropdownMenuContent>
+        </DropdownMenu>
+      </div>
+    </div>
+  )
+}
+
+function AddRecurringDialog({
+  open,
+  onClose,
+  onCreated,
+  accounts,
+  categories,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (rule: RecurringRule) => void
+  accounts: Account[]
+  categories: Category[]
+}) {
+  const [type, setType] = useState("expense")
+  const [title, setTitle] = useState("")
+  const [amount, setAmount] = useState("")
+  const [freq, setFreq] = useState("monthly")
+  const [accountId, setAccountId] = useState("")
+  const [categoryId, setCategoryId] = useState("none")
+  const [nextRunAt, setNextRunAt] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  useEffect(() => {
+    if (accounts.length > 0 && !accountId) setAccountId(accounts[0].id)
+  }, [accounts])
+
+  const handleSubmit = async () => {
+    if (!title.trim()) { setError("Title is required"); return }
+    if (!amount || parseFloat(amount) <= 0) { setError("Enter a valid amount > 0"); return }
+    setSaving(true)
+    setError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createRecurringRule({
+        household_id: householdId,
+        freq,
+        title: title.trim(),
+        amount: parseFloat(amount),
+        type,
+        account_id: accountId || undefined,
+        category_id: categoryId !== "none" ? categoryId : undefined,
+        next_run_at: nextRunAt ? new Date(nextRunAt).toISOString() : undefined,
+        is_active: true,
+      })
+      onCreated(created)
+      setTitle("")
+      setAmount("")
+      setFreq("monthly")
+      setCategoryId("none")
+      setNextRunAt("")
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create rule")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const filteredCategories = categories.filter((c) => type === "income" ? c.is_income : !c.is_income)
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Recurring Transaction</DialogTitle>
+          <DialogDescription>Set up a new recurring transaction</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Type</Label>
+              <Select value={type} onValueChange={setType}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="income">Income</SelectItem>
+                  <SelectItem value="expense">Expense / Bill</SelectItem>
+                  <SelectItem value="transfer">Transfer</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Frequency</Label>
+              <Select value={freq} onValueChange={setFreq}>
+                <SelectTrigger><SelectValue /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="daily">Daily</SelectItem>
+                  <SelectItem value="weekly">Weekly</SelectItem>
+                  <SelectItem value="monthly">Monthly</SelectItem>
+                  <SelectItem value="yearly">Yearly</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Title</Label>
+            <Input placeholder="e.g. Netflix, Rent, Salary" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input type="number" placeholder="0.00" min="0.01" step="0.01" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Next Run Date</Label>
+              <Input type="date" value={nextRunAt} onChange={(e) => setNextRunAt(e.target.value)} />
+            </div>
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Account</Label>
+              <Select value={accountId} onValueChange={setAccountId}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={categoryId} onValueChange={setCategoryId}>
+                <SelectTrigger><SelectValue placeholder="Select" /></SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">None</SelectItem>
+                  {filteredCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {saving ? "Creating..." : "Add Recurring"}
+          </Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export default function RecurringPage() {
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [rules, setRules] = useState<RecurringRule[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [groups, setGroups] = useState<RecurringGroups>(EMPTY_GROUPS)
+  const [loading, setLoading] = useState(true)
 
-  const totalMonthlyIncome = recurringTransactions.income.reduce((acc, t) => acc + t.amount, 0)
-  const totalMonthlyBills = recurringTransactions.bills.reduce((acc, t) => acc + t.amount, 0)
-  const totalSubscriptions = recurringTransactions.subscriptions
-    .filter((t) => t.status === "active")
-    .reduce((acc, t) => acc + t.amount, 0)
-  const totalTransfers = recurringTransactions.transfers.reduce((acc, t) => acc + t.amount, 0)
+  const loadData = useCallback(() => {
+    setLoading(true)
+    Promise.all([fetchRecurringRules(), fetchAccounts(), fetchCategories()])
+      .then(([r, a, c]) => {
+        setRules(r)
+        setGroups(groupRules(r))
+        setAccounts(a)
+        setCategories(c)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
 
-  const allRecurring = [
-    ...recurringTransactions.income,
-    ...recurringTransactions.bills,
-    ...recurringTransactions.subscriptions,
-    ...recurringTransactions.transfers,
+  useEffect(() => { loadData() }, [loadData])
+
+  const handleToggle = async (id: string, active: boolean) => {
+    try {
+      const updated = await updateRecurringRule(id, { is_active: active })
+      setRules((prev) => prev.map((r) => r.id === id ? updated : r))
+      setGroups(groupRules(rules.map((r) => r.id === id ? updated : r)))
+    } catch (err) { console.error(err) }
+  }
+
+  const handleDelete = async (id: string) => {
+    if (!confirm("Delete this recurring rule?")) return
+    try {
+      await deleteRecurringRule(id)
+      const updated = rules.filter((r) => r.id !== id)
+      setRules(updated)
+      setGroups(groupRules(updated))
+    } catch (err) { console.error(err) }
+  }
+
+  const handleCreated = (rule: RecurringRule) => {
+    const updated = [rule, ...rules]
+    setRules(updated)
+    setGroups(groupRules(updated))
+  }
+
+  const totalMonthlyIncome = groups.income.reduce((acc, t) => acc + t.amount, 0)
+  const totalMonthlyBills = groups.bills.reduce((acc, t) => acc + t.amount, 0)
+  const totalSubscriptions = groups.subscriptions.filter((t) => t.status === "active").reduce((acc, t) => acc + t.amount, 0)
+  const totalTransfers = groups.transfers.reduce((acc, t) => acc + t.amount, 0)
+  const allItems = [...groups.income, ...groups.bills, ...groups.subscriptions, ...groups.transfers]
+  const activeCount = allItems.filter((t) => t.status === "active").length
+
+  const forecastData = [
+    { month: "This month", income: totalMonthlyIncome, expenses: totalMonthlyBills + totalSubscriptions },
+    { month: "Next month", income: totalMonthlyIncome, expenses: totalMonthlyBills + totalSubscriptions },
+    { month: "+2 months", income: totalMonthlyIncome, expenses: totalMonthlyBills + totalSubscriptions },
   ]
-
-  const upcomingThisWeek = allRecurring
-    .filter((t) => t.status === "active")
-    .sort((a, b) => new Date(a.nextDate).getTime() - new Date(b.nextDate).getTime())
-    .slice(0, 5)
 
   return (
     <div className="space-y-6">
@@ -298,120 +403,61 @@ export default function RecurringPage() {
             Manage your recurring income, bills, and subscriptions
           </p>
         </div>
-        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
-          <DialogTrigger asChild>
-            <Button size="sm">
-              <Plus className="mr-2 h-4 w-4" />
-              Add Recurring
-            </Button>
-          </DialogTrigger>
-          <DialogContent>
-            <DialogHeader>
-              <DialogTitle>Add Recurring Transaction</DialogTitle>
-              <DialogDescription>Set up a new recurring transaction</DialogDescription>
-            </DialogHeader>
-            <div className="space-y-4 py-4">
-              <div className="space-y-2">
-                <Label>Type</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select type" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="income">Income</SelectItem>
-                    <SelectItem value="bill">Bill</SelectItem>
-                    <SelectItem value="subscription">Subscription</SelectItem>
-                    <SelectItem value="transfer">Transfer</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Name</Label>
-                <Input placeholder="e.g., Netflix, Rent, Salary" />
-              </div>
-              <div className="space-y-2">
-                <Label>Amount</Label>
-                <Input type="number" placeholder="0.00" />
-              </div>
-              <div className="space-y-2">
-                <Label>Frequency</Label>
-                <Select>
-                  <SelectTrigger>
-                    <SelectValue placeholder="Select frequency" />
-                  </SelectTrigger>
-                  <SelectContent>
-                    <SelectItem value="weekly">Weekly</SelectItem>
-                    <SelectItem value="biweekly">Bi-weekly</SelectItem>
-                    <SelectItem value="monthly">Monthly</SelectItem>
-                    <SelectItem value="quarterly">Quarterly</SelectItem>
-                    <SelectItem value="yearly">Yearly</SelectItem>
-                  </SelectContent>
-                </Select>
-              </div>
-              <div className="space-y-2">
-                <Label>Start Date</Label>
-                <Input type="date" />
-              </div>
-            </div>
-            <DialogFooter>
-              <Button variant="outline" onClick={() => setIsAddOpen(false)}>
-                Cancel
-              </Button>
-              <Button onClick={() => setIsAddOpen(false)}>Add Transaction</Button>
-            </DialogFooter>
-          </DialogContent>
-        </Dialog>
+        <Button size="sm" onClick={() => setIsAddOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Recurring
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
-                <ArrowDownLeft className="h-5 w-5 text-success" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Monthly Income</p>
-                <p className="text-xl font-bold text-success">+${totalMonthlyIncome.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-success">+${totalMonthlyIncome.toLocaleString()}</p>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
+                <TrendingUp className="h-5 w-5 text-success" />
               </div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
-                <ArrowUpRight className="h-5 w-5 text-destructive" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Monthly Bills</p>
-                <p className="text-xl font-bold text-destructive">-${totalMonthlyBills.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-destructive">-${totalMonthlyBills.toLocaleString()}</p>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
+                <TrendingDown className="h-5 w-5 text-destructive" />
               </div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
-                <Repeat className="h-5 w-5 text-warning" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Subscriptions</p>
-                <p className="text-xl font-bold text-foreground">${totalSubscriptions.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-foreground">${totalSubscriptions.toFixed(2)}</p>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
+                <Repeat className="h-5 w-5 text-primary" />
               </div>
             </div>
           </CardContent>
         </Card>
         <Card>
           <CardContent className="pt-6">
-            <div className="flex items-center gap-3">
-              <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                <TrendingUp className="h-5 w-5 text-primary" />
-              </div>
+            <div className="flex items-center justify-between">
               <div>
-                <p className="text-sm text-muted-foreground">Auto Savings</p>
-                <p className="text-xl font-bold text-foreground">${totalTransfers.toLocaleString()}</p>
+                <p className="text-sm text-muted-foreground">Active Rules</p>
+                <p className="text-2xl font-bold text-foreground">{activeCount}</p>
+              </div>
+              <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
+                <CheckCircle2 className="h-5 w-5 text-success" />
               </div>
             </div>
           </CardContent>
@@ -421,20 +467,14 @@ export default function RecurringPage() {
       <div className="grid gap-6 lg:grid-cols-3">
         <Card className="lg:col-span-2">
           <CardHeader>
-            <CardTitle className="text-base font-semibold">Monthly Forecast</CardTitle>
-            <CardDescription>Projected recurring income vs expenses</CardDescription>
+            <CardTitle className="text-base font-semibold">Recurring Cashflow Forecast</CardTitle>
+            <CardDescription>Expected recurring income vs expenses</CardDescription>
           </CardHeader>
           <CardContent>
-            <ChartContainer config={chartConfig} className="h-[250px] w-full">
-              <BarChart data={monthlyForecast} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+            <ChartContainer config={chartConfig} className="h-[220px] w-full">
+              <BarChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                <YAxis
-                  tickLine={false}
-                  axisLine={false}
-                  tickMargin={8}
-                  fontSize={12}
-                  tickFormatter={(value) => `$${value / 1000}k`}
-                />
+                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v}`} />
                 <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                 <Bar dataKey="income" fill="var(--color-income)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="expenses" fill="var(--color-expenses)" radius={[4, 4, 0, 0]} />
@@ -445,377 +485,90 @@ export default function RecurringPage() {
 
         <Card>
           <CardHeader>
-            <CardTitle className="text-base font-semibold">Upcoming This Week</CardTitle>
-            <CardDescription>Next scheduled transactions</CardDescription>
+            <CardTitle className="text-base font-semibold">Summary</CardTitle>
+            <CardDescription>Net recurring cashflow</CardDescription>
           </CardHeader>
-          <CardContent className="space-y-3">
-            {upcomingThisWeek.map((transaction) => (
-              <div
-                key={transaction.id}
-                className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2.5"
-              >
-                <div className="flex items-center gap-3">
-                  <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-background">
-                    <Calendar className="h-4 w-4 text-muted-foreground" />
-                  </div>
-                  <div>
-                    <p className="text-sm font-medium text-foreground">{transaction.name}</p>
-                    <p className="text-xs text-muted-foreground">{transaction.nextDate}</p>
-                  </div>
-                </div>
-                <span
-                  className={`text-sm font-semibold tabular-nums ${
-                    transaction.category === "Income" || transaction.category === "Investment Income"
-                      ? "text-success"
-                      : "text-foreground"
-                  }`}
-                >
-                  {transaction.category === "Income" || transaction.category === "Investment Income" ? "+" : "-"}$
-                  {transaction.amount.toLocaleString()}
-                </span>
-              </div>
-            ))}
+          <CardContent className="space-y-4">
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Recurring Income</span>
+              <span className="font-medium text-success">+${totalMonthlyIncome.toLocaleString()}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Bills & Subscriptions</span>
+              <span className="font-medium text-destructive">-${(totalMonthlyBills + totalSubscriptions).toLocaleString()}</span>
+            </div>
+            <div className="flex items-center justify-between text-sm">
+              <span className="text-muted-foreground">Transfers</span>
+              <span className="font-medium text-foreground">-${totalTransfers.toLocaleString()}</span>
+            </div>
+            <div className="border-t border-border pt-3 flex items-center justify-between">
+              <span className="font-semibold text-foreground">Net Monthly</span>
+              <span className={`font-bold text-lg ${
+                totalMonthlyIncome - totalMonthlyBills - totalSubscriptions - totalTransfers >= 0
+                  ? "text-success"
+                  : "text-destructive"
+              }`}>
+                ${(totalMonthlyIncome - totalMonthlyBills - totalSubscriptions - totalTransfers).toLocaleString()}
+              </span>
+            </div>
           </CardContent>
         </Card>
       </div>
 
-      <Tabs defaultValue="all" className="space-y-4">
-        <TabsList>
-          <TabsTrigger value="all">All</TabsTrigger>
-          <TabsTrigger value="income">Income</TabsTrigger>
-          <TabsTrigger value="bills">Bills</TabsTrigger>
-          <TabsTrigger value="subscriptions">Subscriptions</TabsTrigger>
-          <TabsTrigger value="transfers">Transfers</TabsTrigger>
-        </TabsList>
+      <Card>
+        <CardHeader>
+          <CardTitle className="text-base font-semibold">All Recurring Rules</CardTitle>
+          <CardDescription>{allItems.length} rules · {activeCount} active</CardDescription>
+        </CardHeader>
+        <CardContent>
+          {loading ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Loading recurring rules...</p>
+          ) : allItems.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">
+              No recurring rules yet. Click "Add Recurring" to create one.
+            </p>
+          ) : (
+            <Tabs defaultValue="all">
+              <TabsList className="mb-4">
+                <TabsTrigger value="all">All ({allItems.length})</TabsTrigger>
+                <TabsTrigger value="income">Income ({groups.income.length})</TabsTrigger>
+                <TabsTrigger value="bills">Bills ({groups.bills.length})</TabsTrigger>
+                <TabsTrigger value="subscriptions">Subscriptions ({groups.subscriptions.length})</TabsTrigger>
+                <TabsTrigger value="transfers">Transfers ({groups.transfers.length})</TabsTrigger>
+              </TabsList>
 
-        <TabsContent value="all" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">All Recurring Transactions</CardTitle>
-              <CardDescription>{allRecurring.length} total recurring transactions</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {allRecurring.slice(0, 8).map((transaction) => {
-                const isIncome = transaction.category === "Income" || transaction.category === "Investment Income"
-                const isTransfer = transaction.category === "Transfer" || transaction.category === "Retirement"
-
+              {(["all", "income", "bills", "subscriptions", "transfers"] as const).map((tab) => {
+                const items =
+                  tab === "all" ? allItems : groups[tab as keyof RecurringGroups]
                 return (
-                  <div
-                    key={transaction.id}
-                    className="flex items-center justify-between rounded-lg border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/50"
-                  >
-                    <div className="flex items-center gap-4">
-                      <div
-                        className={`flex h-10 w-10 items-center justify-center rounded-lg ${
-                          isIncome
-                            ? "bg-success/10"
-                            : isTransfer
-                            ? "bg-primary/10"
-                            : "bg-destructive/10"
-                        }`}
-                      >
-                        {isIncome ? (
-                          <ArrowDownLeft className="h-5 w-5 text-success" />
-                        ) : isTransfer ? (
-                          <TrendingUp className="h-5 w-5 text-primary" />
-                        ) : (
-                          <ArrowUpRight className="h-5 w-5 text-destructive" />
-                        )}
-                      </div>
-                      <div>
-                        <div className="flex items-center gap-2">
-                          <p className="font-medium text-foreground">{transaction.name}</p>
-                          {transaction.status === "paused" && (
-                            <Badge variant="secondary" className="bg-warning/10 text-warning">
-                              Paused
-                            </Badge>
-                          )}
-                        </div>
-                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                          <span>{transaction.frequency}</span>
-                          <span>•</span>
-                          <span>Next: {transaction.nextDate}</span>
-                        </div>
-                      </div>
-                    </div>
-                    <div className="flex items-center gap-4">
-                      <div className="text-right">
-                        <p
-                          className={`font-semibold tabular-nums ${
-                            isIncome ? "text-success" : isTransfer ? "text-primary" : "text-foreground"
-                          }`}
-                        >
-                          {isIncome ? "+" : "-"}${transaction.amount.toLocaleString()}
-                        </p>
-                        <p className="text-xs text-muted-foreground">{transaction.account}</p>
-                      </div>
-                      <DropdownMenu>
-                        <DropdownMenuTrigger asChild>
-                          <Button variant="ghost" size="icon" className="h-8 w-8">
-                            <MoreHorizontal className="h-4 w-4" />
-                          </Button>
-                        </DropdownMenuTrigger>
-                        <DropdownMenuContent align="end">
-                          <DropdownMenuItem>
-                            <Edit className="mr-2 h-4 w-4" />
-                            Edit
-                          </DropdownMenuItem>
-                          <DropdownMenuItem>
-                            {transaction.status === "paused" ? (
-                              <>
-                                <Play className="mr-2 h-4 w-4" />
-                                Resume
-                              </>
-                            ) : (
-                              <>
-                                <Pause className="mr-2 h-4 w-4" />
-                                Pause
-                              </>
-                            )}
-                          </DropdownMenuItem>
-                          <DropdownMenuSeparator />
-                          <DropdownMenuItem className="text-destructive">
-                            <Trash2 className="mr-2 h-4 w-4" />
-                            Delete
-                          </DropdownMenuItem>
-                        </DropdownMenuContent>
-                      </DropdownMenu>
-                    </div>
-                  </div>
+                  <TabsContent key={tab} value={tab} className="space-y-3">
+                    {items.length === 0 ? (
+                      <p className="py-4 text-center text-sm text-muted-foreground">No {tab} rules.</p>
+                    ) : (
+                      items.map((item) => (
+                        <RecurringCard
+                          key={item.id}
+                          item={item}
+                          onToggle={handleToggle}
+                          onDelete={handleDelete}
+                        />
+                      ))
+                    )}
+                  </TabsContent>
                 )
               })}
-            </CardContent>
-          </Card>
-        </TabsContent>
+            </Tabs>
+          )}
+        </CardContent>
+      </Card>
 
-        <TabsContent value="income">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Recurring Income</CardTitle>
-              <CardDescription>Your regular income sources</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recurringTransactions.income.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between rounded-lg border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
-                      <ArrowDownLeft className="h-5 w-5 text-success" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-foreground">{transaction.name}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{transaction.merchant}</span>
-                        <span>•</span>
-                        <span>{transaction.frequency}</span>
-                        <span>•</span>
-                        <span>Next: {transaction.nextDate}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <p className="text-lg font-semibold tabular-nums text-success">
-                      +${transaction.amount.toLocaleString()}
-                    </p>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>Edit</DropdownMenuItem>
-                        <DropdownMenuItem>View History</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="bills">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Monthly Bills</CardTitle>
-              <CardDescription>Your regular monthly expenses</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recurringTransactions.bills.map((transaction) => (
-                <div
-                  key={transaction.id}
-                  className="flex items-center justify-between rounded-lg border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
-                      <ArrowUpRight className="h-5 w-5 text-destructive" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-foreground">{transaction.name}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{transaction.merchant}</span>
-                        <span>•</span>
-                        <span>Due: {transaction.nextDate}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="text-lg font-semibold tabular-nums text-foreground">
-                        ${transaction.amount.toLocaleString()}
-                      </p>
-                      <Badge variant="secondary" className="text-xs">
-                        {transaction.category}
-                      </Badge>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>Edit</DropdownMenuItem>
-                        <DropdownMenuItem>Mark as Paid</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="subscriptions">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">Subscriptions</CardTitle>
-                  <CardDescription>Manage your subscription services</CardDescription>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Total Monthly</p>
-                  <p className="text-lg font-bold text-foreground">${totalSubscriptions.toFixed(2)}</p>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recurringTransactions.subscriptions.map((subscription) => (
-                <div
-                  key={subscription.id}
-                  className={`flex items-center justify-between rounded-lg border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/50 ${
-                    subscription.status === "paused" ? "opacity-60" : ""
-                  }`}
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-warning/10">
-                      <Repeat className="h-5 w-5 text-warning" />
-                    </div>
-                    <div>
-                      <div className="flex items-center gap-2">
-                        <p className="font-medium text-foreground">{subscription.name}</p>
-                        {subscription.status === "paused" && (
-                          <Badge variant="secondary" className="bg-warning/10 text-warning text-xs">
-                            Paused
-                          </Badge>
-                        )}
-                      </div>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{subscription.category}</span>
-                        <span>•</span>
-                        <span>Next: {subscription.nextDate}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <p className="font-semibold tabular-nums text-foreground">
-                      ${subscription.amount.toFixed(2)}/mo
-                    </p>
-                    <Switch checked={subscription.status === "active"} />
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>Edit</DropdownMenuItem>
-                        <DropdownMenuItem>
-                          {subscription.status === "paused" ? "Resume" : "Pause"}
-                        </DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">Cancel Subscription</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-
-        <TabsContent value="transfers">
-          <Card>
-            <CardHeader>
-              <CardTitle className="text-base font-semibold">Automatic Transfers</CardTitle>
-              <CardDescription>Scheduled savings and investment transfers</CardDescription>
-            </CardHeader>
-            <CardContent className="space-y-3">
-              {recurringTransactions.transfers.map((transfer) => (
-                <div
-                  key={transfer.id}
-                  className="flex items-center justify-between rounded-lg border border-border/50 bg-card px-4 py-3 transition-colors hover:bg-muted/50"
-                >
-                  <div className="flex items-center gap-4">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                      <TrendingUp className="h-5 w-5 text-primary" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-foreground">{transfer.name}</p>
-                      <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                        <span>{transfer.account}</span>
-                        <span>→</span>
-                        <span>{transfer.destination}</span>
-                        <span>•</span>
-                        <span>{transfer.frequency}</span>
-                      </div>
-                    </div>
-                  </div>
-                  <div className="flex items-center gap-4">
-                    <div className="text-right">
-                      <p className="font-semibold tabular-nums text-primary">
-                        ${transfer.amount.toLocaleString()}
-                      </p>
-                      <p className="text-xs text-muted-foreground">Next: {transfer.nextDate}</p>
-                    </div>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button variant="ghost" size="icon" className="h-8 w-8">
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem>Edit</DropdownMenuItem>
-                        <DropdownMenuItem>Pause</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </div>
-                </div>
-              ))}
-            </CardContent>
-          </Card>
-        </TabsContent>
-      </Tabs>
+      <AddRecurringDialog
+        open={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        onCreated={handleCreated}
+        accounts={accounts}
+        categories={categories}
+      />
     </div>
   )
 }

@@ -1,59 +1,21 @@
 "use client"
 
+import { useEffect, useState } from "react"
 import { ArrowUpRight, ArrowDownLeft, MoreHorizontal } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
-
-const transactions = [
-  {
-    id: "1",
-    title: "Salary Deposit",
-    category: "Income",
-    amount: 5200,
-    type: "income",
-    date: "Mar 1, 2024",
-    merchant: "Acme Corp",
-  },
-  {
-    id: "2",
-    title: "Grocery Shopping",
-    category: "Food & Dining",
-    amount: -127.45,
-    type: "expense",
-    date: "Mar 3, 2024",
-    merchant: "Whole Foods",
-  },
-  {
-    id: "3",
-    title: "Electric Bill",
-    category: "Utilities",
-    amount: -89.0,
-    type: "expense",
-    date: "Mar 4, 2024",
-    merchant: "City Power",
-  },
-  {
-    id: "4",
-    title: "Freelance Payment",
-    category: "Income",
-    amount: 850,
-    type: "income",
-    date: "Mar 5, 2024",
-    merchant: "Client XYZ",
-  },
-  {
-    id: "5",
-    title: "Restaurant",
-    category: "Food & Dining",
-    amount: -64.5,
-    type: "expense",
-    date: "Mar 5, 2024",
-    merchant: "The Italian Place",
-  },
-]
+import { fetchTransactions, type Transaction } from "@/lib/api"
 
 export function RecentTransactions() {
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+
+  useEffect(() => {
+    fetchTransactions({ limit: 5, offset: 0 })
+      .then((res) => setTransactions(res.items))
+      .catch(console.error)
+  }, [])
+
   return (
     <Card>
       <CardHeader>
@@ -69,6 +31,9 @@ export function RecentTransactions() {
       </CardHeader>
       <CardContent>
         <div className="space-y-1">
+          {transactions.length === 0 && (
+            <p className="py-6 text-center text-sm text-muted-foreground">No transactions yet.</p>
+          )}
           {transactions.map((transaction) => (
             <div
               key={transaction.id}
@@ -91,7 +56,8 @@ export function RecentTransactions() {
                 <div>
                   <p className="text-sm font-medium text-foreground">{transaction.title}</p>
                   <p className="text-xs text-muted-foreground">
-                    {transaction.merchant} • {transaction.category}
+                    {transaction.merchant ?? transaction.account?.name ?? "—"} •{" "}
+                    {transaction.category?.name ?? "Uncategorized"}
                   </p>
                 </div>
               </div>
@@ -107,7 +73,13 @@ export function RecentTransactions() {
                     {transaction.type === "income" ? "+" : ""}$
                     {Math.abs(transaction.amount).toLocaleString()}
                   </p>
-                  <p className="text-xs text-muted-foreground">{transaction.date}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(transaction.occurred_at).toLocaleDateString("en-US", {
+                      month: "short",
+                      day: "numeric",
+                      year: "numeric",
+                    })}
+                  </p>
                 </div>
                 <Button variant="ghost" size="icon" className="h-8 w-8">
                   <MoreHorizontal className="h-4 w-4" />

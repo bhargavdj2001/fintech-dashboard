@@ -6,5 +6,34 @@ __v0_jsx-dev-runtime.ts
 # Common ignores
 node_modules/
 .next/
+.env
+.env.*
 .env*.local
 .DS_Store
+
+# Python
+backend/.venv/
+backend/__pycache__/
+backend/*.pyc
+backend/.env
+
+# OS
+Thumbs.db
+
+# Logs
+*.log
+
+# IDE
+.vscode/
+.idea/
+
+# Misc
+*.swp
+*.swo
+
+# Sensitive files
+backend/app/.env
+backend/app/env/
+
+# Ignore lock files if not needed
+pnpm-lock.yaml

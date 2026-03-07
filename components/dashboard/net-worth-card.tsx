@@ -1,7 +1,7 @@
 "use client"
 
 import { TrendingUp, TrendingDown, Wallet } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter, CardAction } from "@/components/ui/card"
 
 export function NetWorthCard() {
   const netWorth = 248750

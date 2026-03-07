@@ -1,6 +1,18 @@
 "use client"
 
-import { useState } from "react"
+import { useCallback, useEffect, useState } from "react"
+import {
+  fetchTransactions,
+  fetchAccounts,
+  fetchCategories,
+  fetchHouseholdId,
+  createTransaction,
+  updateTransaction,
+  deleteTransaction,
+  type Account,
+  type Category,
+  type Transaction as ApiTransaction,
+} from "@/lib/api"
 import {
   ArrowUpRight,
   ArrowDownLeft,
@@ -62,7 +74,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Textarea } from "@/components/ui/textarea"
 
@@ -74,229 +85,103 @@ interface Transaction {
   title: string
   description: string
   category: string
-  subcategory?: string
+  categoryId: string | null
   amount: number
   type: TransactionType
   date: string
   merchant: string
   account: string
+  accountId: string
+  householdId: string
   status: TransactionStatus
-  paymentMethod: string
-  tags?: string[]
-  reconciled?: boolean
   notes?: string
 }
 
-const transactions: Transaction[] = [
-  {
-    id: "TXN001",
-    title: "Salary Deposit",
-    description: "Monthly salary",
-    category: "Income",
-    subcategory: "Salary",
-    amount: 5200,
-    type: "income",
-    date: "2024-03-01",
-    merchant: "Acme Corp",
-    account: "Checking",
-    status: "posted",
-    paymentMethod: "Direct Deposit",
-    tags: ["salary", "recurring"],
-    reconciled: true,
-  },
-  {
-    id: "TXN002",
-    title: "Grocery Shopping",
-    description: "Weekly groceries",
-    category: "Food & Dining",
-    subcategory: "Groceries",
-    amount: -127.45,
-    type: "expense",
-    date: "2024-03-03",
-    merchant: "Whole Foods",
-    account: "Credit Card",
-    status: "posted",
-    paymentMethod: "Credit Card",
-    tags: ["groceries", "food"],
-    reconciled: true,
-  },
-  {
-    id: "TXN003",
-    title: "Electric Bill",
-    description: "March electricity",
-    category: "Utilities",
-    subcategory: "Electricity",
-    amount: -89.0,
-    type: "expense",
-    date: "2024-03-04",
-    merchant: "City Power",
-    account: "Checking",
-    status: "posted",
-    paymentMethod: "Auto Pay",
-    tags: ["utilities", "recurring"],
-    reconciled: true,
-  },
-  {
-    id: "TXN004",
-    title: "Freelance Payment",
-    description: "Website design project",
-    category: "Income",
-    subcategory: "Freelance",
-    amount: 850,
-    type: "income",
-    date: "2024-03-05",
-    merchant: "Client XYZ",
-    account: "Checking",
-    status: "posted",
-    paymentMethod: "Bank Transfer",
-    tags: ["freelance", "business"],
-    reconciled: false,
-  },
-  {
-    id: "TXN005",
-    title: "Restaurant",
-    description: "Dinner with friends",
-    category: "Food & Dining",
-    subcategory: "Restaurants",
-    amount: -64.5,
-    type: "expense",
-    date: "2024-03-05",
-    merchant: "The Italian Place",
-    account: "Credit Card",
-    status: "posted",
-    paymentMethod: "Credit Card",
-    tags: ["dining", "social"],
-    reconciled: true,
-    notes: "Birthday dinner",
-  },
-  {
-    id: "TXN006",
-    title: "Netflix Subscription",
-    description: "Monthly subscription",
-    category: "Entertainment",
-    subcategory: "Streaming",
-    amount: -15.99,
-    type: "expense",
-    date: "2024-03-06",
-    merchant: "Netflix",
-    account: "Credit Card",
-    status: "posted",
-    paymentMethod: "Credit Card",
-    tags: ["subscription", "entertainment", "recurring"],
-    reconciled: true,
-  },
-  {
-    id: "TXN007",
-    title: "Gas Station",
-    description: "Fuel refill",
-    category: "Transportation",
-    subcategory: "Fuel",
-    amount: -45.0,
-    type: "expense",
-    date: "2024-03-06",
-    merchant: "Shell",
-    account: "Debit Card",
-    status: "posted",
-    paymentMethod: "Debit Card",
-    tags: ["fuel", "transportation"],
-    reconciled: true,
-  },
-  {
-    id: "TXN008",
-    title: "Investment Transfer",
-    description: "Monthly investment",
-    category: "Transfer",
-    subcategory: "Investment",
-    amount: -500,
-    type: "transfer",
-    date: "2024-03-07",
-    merchant: "Vanguard",
-    account: "Checking",
-    status: "pending",
-    paymentMethod: "Bank Transfer",
-    tags: ["investment", "transfer"],
-    reconciled: false,
-  },
-  {
-    id: "TXN009",
-    title: "Coffee Shop",
-    description: "Morning coffee",
-    category: "Food & Dining",
-    subcategory: "Coffee",
-    amount: -5.75,
-    type: "expense",
-    date: "2024-03-07",
-    merchant: "Starbucks",
-    account: "Debit Card",
-    status: "posted",
-    paymentMethod: "Debit Card",
-    tags: ["coffee", "food"],
-    reconciled: true,
-  },
-  {
-    id: "TXN010",
-    title: "Phone Bill",
-    description: "Monthly plan",
-    category: "Utilities",
-    subcategory: "Phone",
-    amount: -65.0,
-    type: "expense",
-    date: "2024-03-08",
-    merchant: "Verizon",
-    account: "Credit Card",
-    status: "pending",
-    paymentMethod: "Auto Pay",
-    tags: ["phone", "utilities", "recurring"],
-    reconciled: false,
-  },
-]
-
-const categories = [
-  "All Categories",
-  "Income",
-  "Food & Dining",
-  "Utilities",
-  "Entertainment",
-  "Transportation",
-  "Transfer",
-  "Shopping",
-  "Healthcare",
-]
-
-const subcategoryMap: Record<string, string[]> = {
-  "Income": ["Salary", "Freelance", "Investment Income", "Other"],
-  "Food & Dining": ["Groceries", "Restaurants", "Coffee", "Delivery", "Bars"],
-  "Utilities": ["Electricity", "Gas", "Water", "Phone", "Internet"],
-  "Entertainment": ["Streaming", "Movies", "Games", "Events"],
-  "Transportation": ["Fuel", "Parking", "Public Transit", "Ride Share"],
-  "Shopping": ["Clothing", "Electronics", "Home", "Other"],
-  "Healthcare": ["Doctor", "Pharmacy", "Dental", "Vision"],
+function apiToUi(t: ApiTransaction): Transaction {
+  return {
+    id: t.id,
+    title: t.title,
+    description: t.description ?? "",
+    category: t.category?.name ?? "Uncategorized",
+    categoryId: t.category_id,
+    amount: t.type === "income" ? t.amount : -Math.abs(t.amount),
+    type: t.type as TransactionType,
+    date: t.occurred_at,
+    merchant: t.merchant ?? t.account?.name ?? "—",
+    account: t.account?.name ?? "—",
+    accountId: t.account_id,
+    householdId: t.household_id,
+    status: (t.status === "cleared" ? "posted" : t.status ?? "posted") as TransactionStatus,
+    notes: t.description ?? undefined,
+  }
 }
 
 function TransactionDetailSheet({
   transaction,
   open,
   onClose,
+  onSaved,
+  onDeleted,
+  categories,
 }: {
   transaction: Transaction | null
   open: boolean
   onClose: () => void
+  onSaved: (updated: Transaction) => void
+  onDeleted: (id: string) => void
+  categories: Category[]
 }) {
-  const [tagInput, setTagInput] = useState("")
-  const [tags, setTags] = useState<string[]>(transaction?.tags ?? [])
+  const [title, setTitle] = useState("")
+  const [merchant, setMerchant] = useState("")
+  const [categoryId, setCategoryId] = useState("")
+  const [status, setStatus] = useState("")
+  const [notes, setNotes] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [deleting, setDeleting] = useState(false)
+
+  useEffect(() => {
+    if (transaction) {
+      setTitle(transaction.title)
+      setMerchant(transaction.merchant === "—" ? "" : transaction.merchant)
+      setCategoryId(transaction.categoryId ?? "none")
+      setStatus(transaction.status)
+      setNotes(transaction.notes ?? "")
+    }
+  }, [transaction])
 
   if (!transaction) return null
 
-  const addTag = () => {
-    const trimmed = tagInput.trim().toLowerCase()
-    if (trimmed && !tags.includes(trimmed)) {
-      setTags([...tags, trimmed])
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const updated = await updateTransaction(transaction.id, {
+        title: title.trim() || undefined,
+        merchant: merchant.trim() || undefined,
+        category_id: categoryId && categoryId !== "none" ? categoryId : undefined,
+        status: status === "posted" ? "cleared" : "pending",
+        description: notes.trim() || undefined,
+      })
+      onSaved(apiToUi(updated))
+      onClose()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setSaving(false)
     }
-    setTagInput("")
   }
 
-  const removeTag = (tag: string) => {
-    setTags(tags.filter((t) => t !== tag))
+  const handleDelete = async () => {
+    if (!confirm("Delete this transaction?")) return
+    setDeleting(true)
+    try {
+      await deleteTransaction(transaction.id)
+      onDeleted(transaction.id)
+      onClose()
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setDeleting(false)
+    }
   }
 
   return (
@@ -323,7 +208,7 @@ function TransactionDetailSheet({
             </div>
             <div>
               <SheetTitle className="text-left">{transaction.title}</SheetTitle>
-              <SheetDescription className="text-left">{transaction.id}</SheetDescription>
+              <SheetDescription className="text-left font-mono text-xs">{transaction.id}</SheetDescription>
             </div>
           </div>
         </SheetHeader>
@@ -341,9 +226,7 @@ function TransactionDetailSheet({
               }`}
             >
               {transaction.amount > 0 ? "+" : ""}$
-              {Math.abs(transaction.amount).toLocaleString("en-US", {
-                minimumFractionDigits: 2,
-              })}
+              {Math.abs(transaction.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
             </p>
             <div className="mt-2 flex items-center justify-center gap-2">
               <Badge
@@ -361,147 +244,88 @@ function TransactionDetailSheet({
                 )}
                 {transaction.status}
               </Badge>
-              {transaction.reconciled && (
-                <Badge variant="secondary" className="bg-primary/10 text-primary">
-                  Reconciled
-                </Badge>
-              )}
             </div>
           </div>
 
           <Separator />
 
-          {/* Details */}
+          {/* Edit fields */}
           <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">
-              Transaction Details
-            </h3>
-
-            <div className="grid grid-cols-2 gap-4">
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Date</p>
-                <div className="flex items-center gap-1.5">
-                  <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
-                  <p className="text-sm font-medium text-foreground">
-                    {new Date(transaction.date).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </p>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Type</p>
-                <p className="text-sm font-medium capitalize text-foreground">{transaction.type}</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Merchant</p>
-                <div className="flex items-center gap-1.5">
-                  <Building2 className="h-3.5 w-3.5 text-muted-foreground" />
-                  <p className="text-sm font-medium text-foreground">{transaction.merchant}</p>
-                </div>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Account</p>
-                <p className="text-sm font-medium text-foreground">{transaction.account}</p>
-              </div>
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Category</p>
-                <p className="text-sm font-medium text-foreground">{transaction.category}</p>
-              </div>
-              {transaction.subcategory && (
-                <div className="space-y-1">
-                  <p className="text-xs text-muted-foreground">Subcategory</p>
-                  <p className="text-sm font-medium text-foreground">{transaction.subcategory}</p>
-                </div>
-              )}
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Payment Method</p>
-                <div className="flex items-center gap-1.5">
-                  <Receipt className="h-3.5 w-3.5 text-muted-foreground" />
-                  <p className="text-sm font-medium text-foreground">{transaction.paymentMethod}</p>
-                </div>
-              </div>
+            <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Edit Details</h3>
+            <div className="space-y-2">
+              <Label>Title</Label>
+              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
             </div>
-
-            {transaction.description && (
-              <div className="space-y-1">
-                <p className="text-xs text-muted-foreground">Description</p>
-                <p className="text-sm text-foreground">{transaction.description}</p>
-              </div>
-            )}
-          </div>
-
-          <Separator />
-
-          {/* Tags */}
-          <div className="space-y-3">
-            <div className="flex items-center gap-2">
-              <Tag className="h-4 w-4 text-muted-foreground" />
-              <h3 className="text-sm font-semibold text-foreground">Tags</h3>
+            <div className="space-y-2">
+              <Label>Merchant</Label>
+              <Input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Merchant name" />
             </div>
-            <div className="flex flex-wrap gap-2">
-              {tags.map((tag) => (
-                <Badge key={tag} variant="secondary" className="gap-1">
-                  {tag}
-                  <button
-                    onClick={() => removeTag(tag)}
-                    className="ml-1 rounded-full hover:text-destructive"
-                  >
-                    <X className="h-3 w-3" />
-                  </button>
-                </Badge>
-              ))}
+            <div className="space-y-2">
+              <Label>Category</Label>
+              <Select value={categoryId} onValueChange={setCategoryId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">Uncategorized</SelectItem>
+                  {categories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
             </div>
-            <div className="flex gap-2">
-              <Input
-                placeholder="Add tag..."
-                value={tagInput}
-                onChange={(e) => setTagInput(e.target.value)}
-                onKeyDown={(e) => e.key === "Enter" && addTag()}
-                className="h-8 text-sm"
+            <div className="space-y-2">
+              <Label>Status</Label>
+              <Select value={status} onValueChange={setStatus}>
+                <SelectTrigger>
+                  <SelectValue />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="posted">Posted</SelectItem>
+                  <SelectItem value="pending">Pending</SelectItem>
+                </SelectContent>
+              </Select>
+            </div>
+            <div className="space-y-2">
+              <Label>Notes</Label>
+              <Textarea
+                placeholder="Add a note..."
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                className="min-h-[80px] resize-none text-sm"
               />
-              <Button size="sm" variant="outline" onClick={addTag}>
-                Add
-              </Button>
             </div>
           </div>
 
           <Separator />
 
-          {/* Notes */}
-          <div className="space-y-3">
-            <h3 className="text-sm font-semibold text-foreground">Notes</h3>
-            <Textarea
-              placeholder="Add a note..."
-              defaultValue={transaction.notes}
-              className="min-h-[80px] resize-none text-sm"
-            />
-          </div>
-
-          <Separator />
-
-          {/* Actions */}
-          <div className="space-y-2">
-            <Button variant="outline" className="w-full justify-start">
-              <SplitSquareHorizontal className="mr-2 h-4 w-4" />
-              Split Transaction
-            </Button>
-            <Button variant="outline" className="w-full justify-start">
-              <Receipt className="mr-2 h-4 w-4" />
-              Attach Receipt
-            </Button>
-            <Button variant="outline" className="w-full justify-start">
-              <CheckCircle2 className="mr-2 h-4 w-4" />
-              Mark as Reconciled
-            </Button>
+          <div className="grid grid-cols-2 gap-4 text-sm">
+            <div>
+              <p className="text-xs text-muted-foreground">Date</p>
+              <div className="flex items-center gap-1.5 mt-1">
+                <Calendar className="h-3.5 w-3.5 text-muted-foreground" />
+                <p className="font-medium">
+                  {new Date(transaction.date).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}
+                </p>
+              </div>
+            </div>
+            <div>
+              <p className="text-xs text-muted-foreground">Account</p>
+              <p className="font-medium mt-1">{transaction.account}</p>
+            </div>
           </div>
 
           <div className="flex gap-2 pt-2">
-            <Button className="flex-1">Save Changes</Button>
-            <Button variant="outline" className="text-destructive hover:text-destructive">
-              Delete
+            <Button className="flex-1" onClick={handleSave} disabled={saving}>
+              {saving ? "Saving..." : "Save Changes"}
+            </Button>
+            <Button
+              variant="outline"
+              className="text-destructive hover:text-destructive"
+              onClick={handleDelete}
+              disabled={deleting}
+            >
+              {deleting ? "..." : "Delete"}
             </Button>
           </div>
         </div>
@@ -513,11 +337,74 @@ function TransactionDetailSheet({
 function AddTransactionDialog({
   open,
   onClose,
+  onCreated,
+  accounts,
+  categories,
 }: {
   open: boolean
   onClose: () => void
+  onCreated: (txn: Transaction) => void
+  accounts: Account[]
+  categories: Category[]
 }) {
-  const [selectedCategory, setSelectedCategory] = useState("")
+  const [type, setType] = useState<"income" | "expense" | "transfer">("expense")
+  const [amount, setAmount] = useState("")
+  const [title, setTitle] = useState("")
+  const [merchant, setMerchant] = useState("")
+  const [categoryId, setCategoryId] = useState("none")
+  const [accountId, setAccountId] = useState("")
+  const [date, setDate] = useState(new Date().toISOString().split("T")[0])
+  const [description, setDescription] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  // Set default account when accounts load
+  useEffect(() => {
+    if (accounts.length > 0 && !accountId) setAccountId(accounts[0].id)
+  }, [accounts])
+
+  const handleSubmit = async () => {
+    if (!title.trim()) { setError("Title is required"); return }
+    if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) { setError("Enter a valid amount > 0"); return }
+    if (!accountId) { setError("Select an account"); return }
+
+    setSaving(true)
+    setError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createTransaction({
+        household_id: householdId,
+        account_id: accountId,
+        title: title.trim(),
+        amount: parseFloat(amount),
+        type,
+        occurred_at: new Date(date).toISOString(),
+        merchant: merchant.trim() || undefined,
+        description: description.trim() || undefined,
+        category_id: categoryId !== "none" ? categoryId : undefined,
+        status: "cleared",
+        currency: "USD",
+      })
+      onCreated(apiToUi(created))
+      // Reset
+      setType("expense")
+      setAmount("")
+      setTitle("")
+      setMerchant("")
+      setCategoryId("none")
+      setDate(new Date().toISOString().split("T")[0])
+      setDescription("")
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create transaction")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  const filteredCategories = categories.filter((c) =>
+    type === "income" ? c.is_income : !c.is_income
+  )
 
   return (
     <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
@@ -527,10 +414,11 @@ function AddTransactionDialog({
           <DialogDescription>Record a new financial transaction</DialogDescription>
         </DialogHeader>
         <div className="space-y-4 py-2">
+          {error && <p className="text-sm text-destructive">{error}</p>}
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Type</Label>
-              <Select defaultValue="expense">
+              <Select value={type} onValueChange={(v) => { setType(v as typeof type); setCategoryId("none") }}>
                 <SelectTrigger>
                   <SelectValue />
                 </SelectTrigger>
@@ -543,43 +431,51 @@ function AddTransactionDialog({
             </div>
             <div className="space-y-2">
               <Label>Amount</Label>
-              <Input type="number" placeholder="0.00" />
+              <Input
+                type="number"
+                placeholder="0.00"
+                min="0.01"
+                step="0.01"
+                value={amount}
+                onChange={(e) => setAmount(e.target.value)}
+              />
             </div>
           </div>
 
           <div className="space-y-2">
             <Label>Title</Label>
-            <Input placeholder="Transaction title" />
+            <Input placeholder="Transaction title" value={title} onChange={(e) => setTitle(e.target.value)} />
           </div>
 
           <div className="space-y-2">
             <Label>Merchant</Label>
-            <Input placeholder="Merchant or payee name" />
+            <Input placeholder="Merchant or payee name" value={merchant} onChange={(e) => setMerchant(e.target.value)} />
           </div>
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
               <Label>Category</Label>
-              <Select onValueChange={setSelectedCategory}>
+              <Select value={categoryId} onValueChange={setCategoryId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select" />
                 </SelectTrigger>
                 <SelectContent>
-                  {Object.keys(subcategoryMap).map((cat) => (
-                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
+                  <SelectItem value="none">Uncategorized</SelectItem>
+                  {filteredCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
             </div>
             <div className="space-y-2">
-              <Label>Subcategory</Label>
-              <Select disabled={!selectedCategory}>
+              <Label>Account</Label>
+              <Select value={accountId} onValueChange={setAccountId}>
                 <SelectTrigger>
                   <SelectValue placeholder="Select" />
                 </SelectTrigger>
                 <SelectContent>
-                  {(subcategoryMap[selectedCategory] ?? []).map((sub) => (
-                    <SelectItem key={sub} value={sub}>{sub}</SelectItem>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -588,33 +484,20 @@ function AddTransactionDialog({
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
-              <Label>Account</Label>
-              <Select>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="checking">Checking</SelectItem>
-                  <SelectItem value="savings">Savings</SelectItem>
-                  <SelectItem value="credit">Credit Card</SelectItem>
-                  <SelectItem value="cash">Cash</SelectItem>
-                </SelectContent>
-              </Select>
+              <Label>Date</Label>
+              <Input type="date" value={date} onChange={(e) => setDate(e.target.value)} />
             </div>
             <div className="space-y-2">
-              <Label>Date</Label>
-              <Input type="date" defaultValue={new Date().toISOString().split("T")[0]} />
+              <Label>Description (optional)</Label>
+              <Input placeholder="Brief description" value={description} onChange={(e) => setDescription(e.target.value)} />
             </div>
-          </div>
-
-          <div className="space-y-2">
-            <Label>Description (optional)</Label>
-            <Input placeholder="Brief description" />
           </div>
         </div>
         <DialogFooter>
-          <Button variant="outline" onClick={onClose}>Cancel</Button>
-          <Button onClick={onClose}>Add Transaction</Button>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>
+            {saving ? "Adding..." : "Add Transaction"}
+          </Button>
         </DialogFooter>
       </DialogContent>
     </Dialog>
@@ -622,37 +505,66 @@ function AddTransactionDialog({
 }
 
 export default function TransactionsPage() {
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
   const [searchQuery, setSearchQuery] = useState("")
-  const [categoryFilter, setCategoryFilter] = useState("All Categories")
+  const [categoryFilter, setCategoryFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [loading, setLoading] = useState(true)
+
+  const loadData = useCallback(() => {
+    setLoading(true)
+    Promise.all([
+      fetchTransactions({ limit: 200, offset: 0 }),
+      fetchAccounts(),
+      fetchCategories(),
+    ])
+      .then(([res, accts, cats]) => {
+        setTransactions(res.items.map(apiToUi))
+        setAccounts(accts)
+        setCategories(cats)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  useEffect(() => { loadData() }, [loadData])
+
+  const uniqueCategories = Array.from(new Set(transactions.map((t) => t.category))).sort()
 
   const filteredTransactions = transactions.filter((transaction) => {
     const matchesSearch =
       transaction.title.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      transaction.merchant.toLowerCase().includes(searchQuery.toLowerCase()) ||
-      (transaction.tags ?? []).some((t) => t.includes(searchQuery.toLowerCase()))
-    const matchesCategory =
-      categoryFilter === "All Categories" || transaction.category === categoryFilter
+      transaction.merchant.toLowerCase().includes(searchQuery.toLowerCase())
+    const matchesCategory = categoryFilter === "all" || transaction.category === categoryFilter
     const matchesType = typeFilter === "all" || transaction.type === typeFilter
     const matchesStatus = statusFilter === "all" || transaction.status === statusFilter
-
     return matchesSearch && matchesCategory && matchesType && matchesStatus
   })
 
-  const totalIncome = transactions
-    .filter((t) => t.type === "income")
-    .reduce((acc, t) => acc + t.amount, 0)
-  const totalExpenses = transactions
-    .filter((t) => t.type === "expense")
-    .reduce((acc, t) => acc + Math.abs(t.amount), 0)
+  const totalIncome = transactions.filter((t) => t.type === "income").reduce((acc, t) => acc + t.amount, 0)
+  const totalExpenses = transactions.filter((t) => t.type === "expense").reduce((acc, t) => acc + Math.abs(t.amount), 0)
 
   const openDetail = (transaction: Transaction) => {
     setSelectedTransaction(transaction)
     setIsDetailOpen(true)
+  }
+
+  const handleSaved = (updated: Transaction) => {
+    setTransactions((prev) => prev.map((t) => t.id === updated.id ? updated : t))
+  }
+
+  const handleDeleted = (id: string) => {
+    setTransactions((prev) => prev.filter((t) => t.id !== id))
+  }
+
+  const handleCreated = (txn: Transaction) => {
+    setTransactions((prev) => [txn, ...prev])
   }
 
   return (
@@ -665,20 +577,6 @@ export default function TransactionsPage() {
           </p>
         </div>
         <div className="flex items-center gap-2">
-          <DropdownMenu>
-            <DropdownMenuTrigger asChild>
-              <Button variant="outline" size="sm">
-                <Download className="mr-2 h-4 w-4" />
-                Export
-                <ChevronDown className="ml-2 h-4 w-4" />
-              </Button>
-            </DropdownMenuTrigger>
-            <DropdownMenuContent align="end">
-              <DropdownMenuItem>Export as CSV</DropdownMenuItem>
-              <DropdownMenuItem>Export as Excel</DropdownMenuItem>
-              <DropdownMenuItem>Export as PDF</DropdownMenuItem>
-            </DropdownMenuContent>
-          </DropdownMenu>
           <Button size="sm" onClick={() => setIsAddOpen(true)}>
             <Plus className="mr-2 h-4 w-4" />
             Add Transaction
@@ -745,7 +643,7 @@ export default function TransactionsPage() {
               <div className="relative">
                 <Search className="absolute left-3 top-1/2 h-4 w-4 -translate-y-1/2 text-muted-foreground" />
                 <Input
-                  placeholder="Search transactions, tags..."
+                  placeholder="Search transactions..."
                   className="w-[220px] pl-9"
                   value={searchQuery}
                   onChange={(e) => setSearchQuery(e.target.value)}
@@ -756,10 +654,9 @@ export default function TransactionsPage() {
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
                 <SelectContent>
-                  {categories.map((category) => (
-                    <SelectItem key={category} value={category}>
-                      {category}
-                    </SelectItem>
+                  <SelectItem value="all">All Categories</SelectItem>
+                  {uniqueCategories.map((cat) => (
+                    <SelectItem key={cat} value={cat}>{cat}</SelectItem>
                   ))}
                 </SelectContent>
               </Select>
@@ -788,94 +685,69 @@ export default function TransactionsPage() {
           </div>
         </CardHeader>
         <CardContent>
-          <Table>
-            <TableHeader>
-              <TableRow>
-                <TableHead>Transaction</TableHead>
-                <TableHead>Category</TableHead>
-                <TableHead>Account</TableHead>
-                <TableHead>Date</TableHead>
-                <TableHead>Status</TableHead>
-                <TableHead className="text-right">Amount</TableHead>
-                <TableHead className="w-[50px]"></TableHead>
-              </TableRow>
-            </TableHeader>
-            <TableBody>
-              {filteredTransactions.map((transaction) => (
-                <TableRow
-                  key={transaction.id}
-                  className="cursor-pointer"
-                  onClick={() => openDetail(transaction)}
-                >
-                  <TableCell>
-                    <div className="flex items-center gap-3">
-                      <div
-                        className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                          transaction.type === "income"
-                            ? "bg-success/10"
-                            : transaction.type === "transfer"
-                            ? "bg-primary/10"
-                            : "bg-destructive/10"
-                        }`}
-                      >
-                        {transaction.type === "income" ? (
-                          <ArrowDownLeft className="h-4 w-4 text-success" />
-                        ) : transaction.type === "transfer" ? (
-                          <ArrowUpDown className="h-4 w-4 text-primary" />
-                        ) : (
-                          <ArrowUpRight className="h-4 w-4 text-destructive" />
-                        )}
-                      </div>
-                      <div>
-                        <p className="font-medium text-foreground">{transaction.title}</p>
-                        <div className="flex items-center gap-1">
-                          <p className="text-xs text-muted-foreground">{transaction.merchant}</p>
-                          {transaction.tags && transaction.tags.length > 0 && (
-                            <div className="flex gap-1">
-                              {transaction.tags.slice(0, 2).map((tag) => (
-                                <Badge
-                                  key={tag}
-                                  variant="secondary"
-                                  className="h-4 px-1 text-[10px]"
-                                >
-                                  {tag}
-                                </Badge>
-                              ))}
-                              {transaction.tags.length > 2 && (
-                                <span className="text-[10px] text-muted-foreground">
-                                  +{transaction.tags.length - 2}
-                                </span>
-                              )}
-                            </div>
+          {loading ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">Loading transactions...</p>
+          ) : filteredTransactions.length === 0 ? (
+            <p className="py-8 text-center text-sm text-muted-foreground">No transactions found.</p>
+          ) : (
+            <Table>
+              <TableHeader>
+                <TableRow>
+                  <TableHead>Transaction</TableHead>
+                  <TableHead>Category</TableHead>
+                  <TableHead>Account</TableHead>
+                  <TableHead>Date</TableHead>
+                  <TableHead>Status</TableHead>
+                  <TableHead className="text-right">Amount</TableHead>
+                  <TableHead className="w-[50px]"></TableHead>
+                </TableRow>
+              </TableHeader>
+              <TableBody>
+                {filteredTransactions.map((transaction) => (
+                  <TableRow
+                    key={transaction.id}
+                    className="cursor-pointer"
+                    onClick={() => openDetail(transaction)}
+                  >
+                    <TableCell>
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                            transaction.type === "income"
+                              ? "bg-success/10"
+                              : transaction.type === "transfer"
+                              ? "bg-primary/10"
+                              : "bg-destructive/10"
+                          }`}
+                        >
+                          {transaction.type === "income" ? (
+                            <ArrowDownLeft className="h-4 w-4 text-success" />
+                          ) : transaction.type === "transfer" ? (
+                            <ArrowUpDown className="h-4 w-4 text-primary" />
+                          ) : (
+                            <ArrowUpRight className="h-4 w-4 text-destructive" />
                           )}
                         </div>
+                        <div>
+                          <p className="font-medium text-foreground">{transaction.title}</p>
+                          <p className="text-xs text-muted-foreground">{transaction.merchant}</p>
+                        </div>
                       </div>
-                    </div>
-                  </TableCell>
-                  <TableCell>
-                    <div>
+                    </TableCell>
+                    <TableCell>
                       <Badge variant="secondary" className="font-normal">
                         {transaction.category}
                       </Badge>
-                      {transaction.subcategory && (
-                        <p className="text-xs text-muted-foreground mt-0.5">
-                          {transaction.subcategory}
-                        </p>
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {transaction.account}
-                  </TableCell>
-                  <TableCell className="text-muted-foreground">
-                    {new Date(transaction.date).toLocaleDateString("en-US", {
-                      month: "short",
-                      day: "numeric",
-                      year: "numeric",
-                    })}
-                  </TableCell>
-                  <TableCell>
-                    <div className="flex items-center gap-2">
+                    </TableCell>
+                    <TableCell className="text-muted-foreground">{transaction.account}</TableCell>
+                    <TableCell className="text-muted-foreground">
+                      {new Date(transaction.date).toLocaleDateString("en-US", {
+                        month: "short",
+                        day: "numeric",
+                        year: "numeric",
+                      })}
+                    </TableCell>
+                    <TableCell>
                       <Badge
                         variant="secondary"
                         className={
@@ -886,53 +758,59 @@ export default function TransactionsPage() {
                       >
                         {transaction.status}
                       </Badge>
-                      {transaction.reconciled && (
-                        <CheckCircle2 className="h-3.5 w-3.5 text-primary" />
-                      )}
-                    </div>
-                  </TableCell>
-                  <TableCell className="text-right">
-                    <span
-                      className={`font-semibold tabular-nums ${
-                        transaction.type === "income"
-                          ? "text-success"
-                          : transaction.type === "transfer"
-                          ? "text-primary"
-                          : "text-foreground"
-                      }`}
-                    >
-                      {transaction.amount > 0 ? "+" : ""}$
-                      {Math.abs(transaction.amount).toLocaleString()}
-                    </span>
-                  </TableCell>
-                  <TableCell>
-                    <DropdownMenu>
-                      <DropdownMenuTrigger asChild>
-                        <Button
-                          variant="ghost"
-                          size="icon"
-                          className="h-8 w-8"
-                          onClick={(e) => e.stopPropagation()}
-                        >
-                          <MoreHorizontal className="h-4 w-4" />
-                        </Button>
-                      </DropdownMenuTrigger>
-                      <DropdownMenuContent align="end">
-                        <DropdownMenuItem onClick={() => openDetail(transaction)}>
-                          View Details
-                        </DropdownMenuItem>
-                        <DropdownMenuItem>Edit</DropdownMenuItem>
-                        <DropdownMenuItem>Split Transaction</DropdownMenuItem>
-                        <DropdownMenuItem>Mark Reconciled</DropdownMenuItem>
-                        <DropdownMenuSeparator />
-                        <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                      </DropdownMenuContent>
-                    </DropdownMenu>
-                  </TableCell>
-                </TableRow>
-              ))}
-            </TableBody>
-          </Table>
+                    </TableCell>
+                    <TableCell className="text-right">
+                      <span
+                        className={`font-semibold tabular-nums ${
+                          transaction.type === "income"
+                            ? "text-success"
+                            : transaction.type === "transfer"
+                            ? "text-primary"
+                            : "text-foreground"
+                        }`}
+                      >
+                        {transaction.amount > 0 ? "+" : ""}$
+                        {Math.abs(transaction.amount).toLocaleString()}
+                      </span>
+                    </TableCell>
+                    <TableCell>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem onClick={(e) => { e.stopPropagation(); openDetail(transaction) }}>
+                            View / Edit
+                          </DropdownMenuItem>
+                          <DropdownMenuSeparator />
+                          <DropdownMenuItem
+                            className="text-destructive"
+                            onClick={async (e) => {
+                              e.stopPropagation()
+                              if (!confirm("Delete this transaction?")) return
+                              try {
+                                await deleteTransaction(transaction.id)
+                                handleDeleted(transaction.id)
+                              } catch (err) { console.error(err) }
+                            }}
+                          >
+                            Delete
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
+                    </TableCell>
+                  </TableRow>
+                ))}
+              </TableBody>
+            </Table>
+          )}
         </CardContent>
       </Card>
 
@@ -940,9 +818,18 @@ export default function TransactionsPage() {
         transaction={selectedTransaction}
         open={isDetailOpen}
         onClose={() => setIsDetailOpen(false)}
+        onSaved={handleSaved}
+        onDeleted={handleDeleted}
+        categories={categories}
       />
 
-      <AddTransactionDialog open={isAddOpen} onClose={() => setIsAddOpen(false)} />
+      <AddTransactionDialog
+        open={isAddOpen}
+        onClose={() => setIsAddOpen(false)}
+        onCreated={handleCreated}
+        accounts={accounts}
+        categories={categories}
+      />
     </div>
   )
 }
