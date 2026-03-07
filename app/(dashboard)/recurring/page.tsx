@@ -284,7 +284,7 @@ export default function RecurringPage() {
     ...recurringTransactions.transfers,
   ]
 
-  const upcomingThis week = allRecurring
+  const upcomingThisWeek = allRecurring
     .filter((t) => t.status === "active")
     .sort((a, b) => new Date(a.nextDate).getTime() - new Date(b.nextDate).getTime())
     .slice(0, 5)
@@ -449,7 +449,7 @@ export default function RecurringPage() {
             <CardDescription>Next scheduled transactions</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {upcomingThis week.map((transaction) => (
+            {upcomingThisWeek.map((transaction) => (
               <div
                 key={transaction.id}
                 className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2.5"

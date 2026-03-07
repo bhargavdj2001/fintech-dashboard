@@ -42,6 +42,7 @@ const navigationItems = [
   { name: "Goals", href: "/goals", icon: Target, shortcut: "G" },
   { name: "Recurring", href: "/recurring", icon: Repeat, shortcut: "R" },
   { name: "Reports", href: "/reports", icon: FileText, shortcut: "P" },
+  { name: "Settings", href: "/settings", icon: Settings, shortcut: "," },
 ]
 
 const quickActions = [
