@@ -1,15 +1,16 @@
 """
 Routes — /reports
 """
+import uuid
 from datetime import datetime
 from typing import Optional
 
 from fastapi import APIRouter, Depends, HTTPException, Query
 from sqlalchemy.orm import Session
 
-from app.dependencies import get_db
-from app.schemas import PeriodReportOut
-from app.services import report_service
+from app.dependencies import get_db, get_current_household_id
+from app.schemas import NetWorthReportOut, PeriodReportOut
+from app.services import networth_service, report_service
 
 router = APIRouter(prefix="/reports", tags=["Reports"])
 
@@ -19,6 +20,7 @@ def period_report(
     start_date: Optional[datetime] = Query(None, description="Period start (ISO 8601)"),
     end_date: Optional[datetime] = Query(None, description="Period end (ISO 8601)"),
     db: Session = Depends(get_db),
+    household_id: uuid.UUID = Depends(get_current_household_id),
 ):
     """
     Return a financial summary for a date range.
@@ -27,6 +29,21 @@ def period_report(
     and the full transaction list for the period.
     """
     try:
-        return report_service.get_period_report(db, start_date=start_date, end_date=end_date)
+        return report_service.get_period_report(db, household_id=household_id, start_date=start_date, end_date=end_date)
+    except Exception as exc:
+        raise HTTPException(status_code=500, detail=str(exc))
+
+
+@router.get("/networth", response_model=NetWorthReportOut)
+def networth_report(
+    db: Session = Depends(get_db),
+    household_id: uuid.UUID = Depends(get_current_household_id),
+):
+    """
+    Return net worth history (one point per day it's been recorded by the
+    daily scheduler job) plus the current live breakdown.
+    """
+    try:
+        return networth_service.get_networth_report(db, household_id)
     except Exception as exc:
         raise HTTPException(status_code=500, detail=str(exc))

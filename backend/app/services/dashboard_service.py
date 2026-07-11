@@ -3,11 +3,13 @@ Dashboard service — aggregate stats for the summary endpoint.
 """
 from datetime import datetime, timezone
 from decimal import Decimal
+from uuid import UUID
 
 from sqlalchemy import func
 from sqlalchemy.orm import Session, joinedload
 
 from app.models import Account, Transaction, TransactionSplit
+from app.services.account_service import attach_current_balances
 
 
 def _month_bounds():
@@ -18,7 +20,7 @@ def _month_bounds():
     return start, now
 
 
-def get_dashboard_summary(db: Session) -> dict:
+def get_dashboard_summary(db: Session, household_id: UUID) -> dict:
     """
     Compute:
       - total_balance          sum of all account balances
@@ -29,7 +31,10 @@ def get_dashboard_summary(db: Session) -> dict:
       - category_breakdown     { category_name: total_amount } for current month expenses
     """
     # --- total balance ---
-    total_balance = db.query(func.coalesce(func.sum(Account.balance), 0)).scalar() or Decimal("0")
+    accounts = attach_current_balances(
+        db, db.query(Account).filter(Account.household_id == household_id).all()
+    )
+    total_balance = Decimal(str(sum(a.current_balance for a in accounts)))
 
     # --- monthly income / expense ---
     start, end = _month_bounds()
@@ -37,6 +42,7 @@ def get_dashboard_summary(db: Session) -> dict:
     income_row = (
         db.query(func.coalesce(func.sum(Transaction.amount), 0))
         .filter(
+            Transaction.household_id == household_id,
             Transaction.type == "income",
             Transaction.occurred_at >= start,
             Transaction.occurred_at <= end,
@@ -48,6 +54,7 @@ def get_dashboard_summary(db: Session) -> dict:
     expense_row = (
         db.query(func.coalesce(func.sum(Transaction.amount), 0))
         .filter(
+            Transaction.household_id == household_id,
             Transaction.type == "expense",
             Transaction.occurred_at >= start,
             Transaction.occurred_at <= end,
@@ -64,6 +71,7 @@ def get_dashboard_summary(db: Session) -> dict:
             joinedload(Transaction.category),
             joinedload(Transaction.splits).joinedload(TransactionSplit.profile),
         )
+        .filter(Transaction.household_id == household_id)
         .order_by(Transaction.occurred_at.desc())
         .limit(5)
         .all()
@@ -74,6 +82,7 @@ def get_dashboard_summary(db: Session) -> dict:
         db.query(Transaction)
         .options(joinedload(Transaction.category))
         .filter(
+            Transaction.household_id == household_id,
             Transaction.type == "expense",
             Transaction.occurred_at >= start,
             Transaction.occurred_at <= end,

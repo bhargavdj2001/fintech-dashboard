@@ -4,6 +4,7 @@ Report service — period-based financial summaries.
 from datetime import datetime
 from decimal import Decimal
 from typing import Optional
+from uuid import UUID
 
 from sqlalchemy.orm import Session, joinedload
 
@@ -13,6 +14,7 @@ from app.utils import safe_decimal
 
 def get_period_report(
     db: Session,
+    household_id: UUID,
     start_date: Optional[datetime],
     end_date: Optional[datetime],
 ) -> dict:
@@ -32,6 +34,7 @@ def get_period_report(
             joinedload(Transaction.category),
             joinedload(Transaction.splits).joinedload(TransactionSplit.profile),
         )
+        .filter(Transaction.household_id == household_id)
     )
 
     if start_date:

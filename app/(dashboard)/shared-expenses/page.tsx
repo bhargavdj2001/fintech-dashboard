@@ -1,15 +1,32 @@
 "use client"
 
-import { useState, useMemo, useEffect } from "react"
-import { fetchTransactions, fetchSplitSummary, type Transaction as ApiTransaction, type SplitSummary } from "@/lib/api"
+import { useState, useMemo, useCallback, useEffect } from "react"
+import { useCurrency } from "@/lib/currency"
+import {
+  fetchTransactions,
+  fetchSplitSummary,
+  fetchBalancesByPartner,
+  fetchSettlements,
+  fetchProfiles,
+  fetchAccounts,
+  fetchCategories,
+  fetchHouseholdId,
+  createTransaction,
+  createSettlement,
+  type Transaction as ApiTransaction,
+  type SplitSummary,
+  type PartnerBalance,
+  type Settlement,
+  type Profile,
+  type Account,
+  type Category,
+} from "@/lib/api"
 import {
   Plus,
   Users,
   ArrowRight,
   Check,
   Clock,
-  MoreHorizontal,
-  UserPlus,
   Receipt,
   DollarSign,
   Activity,
@@ -21,13 +38,13 @@ import {
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Avatar, AvatarFallback } from "@/components/ui/avatar"
+import { Checkbox } from "@/components/ui/checkbox"
 import { Badge } from "@/components/ui/badge"
 import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
 import {
@@ -37,7 +54,6 @@ import {
   DialogFooter,
   DialogHeader,
   DialogTitle,
-  DialogTrigger,
 } from "@/components/ui/dialog"
 import { Input } from "@/components/ui/input"
 import { Label } from "@/components/ui/label"
@@ -67,114 +83,12 @@ import {
   LineChart,
   Line,
   Tooltip,
-  Legend,
   ResponsiveContainer,
 } from "recharts"
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 import { DateRangePicker, DATE_RANGE_PRESETS } from "@/components/date-range-picker"
 import { DateRange } from "react-day-picker"
-import { parseISO, isWithinInterval } from "date-fns"
-
-const groups = [
-  {
-    id: "1",
-    name: "Household",
-    members: [
-      { name: "John", avatar: "JD", color: "bg-primary" },
-      { name: "Sarah", avatar: "S", color: "bg-chart-2" },
-    ],
-    balance: 245.5,
-    type: "household",
-  },
-  {
-    id: "2",
-    name: "Trip to Paris",
-    members: [
-      { name: "John", avatar: "JD", color: "bg-primary" },
-      { name: "Mike", avatar: "M", color: "bg-chart-3" },
-      { name: "Lisa", avatar: "L", color: "bg-chart-4" },
-    ],
-    balance: -180.25,
-    type: "trip",
-  },
-  {
-    id: "3",
-    name: "Office Lunch",
-    members: [
-      { name: "John", avatar: "JD", color: "bg-primary" },
-      { name: "Alex", avatar: "A", color: "bg-chart-5" },
-      { name: "Emma", avatar: "E", color: "bg-chart-1" },
-      { name: "Tom", avatar: "T", color: "bg-chart-2" },
-    ],
-    balance: 52.0,
-    type: "project",
-  },
-]
-
-const expenses = [
-  {
-    id: "1",
-    title: "Groceries",
-    amount: 127.45,
-    paidBy: "John",
-    paidByAvatar: "JD",
-    group: "Household",
-    date: "Mar 5, 2024",
-    splitWith: ["Sarah"],
-    status: "pending",
-  },
-  {
-    id: "2",
-    title: "Restaurant Dinner",
-    amount: 245.0,
-    paidBy: "Mike",
-    paidByAvatar: "M",
-    group: "Trip to Paris",
-    date: "Mar 4, 2024",
-    splitWith: ["John", "Lisa"],
-    status: "settled",
-  },
-  {
-    id: "3",
-    title: "Electricity Bill",
-    amount: 89.0,
-    paidBy: "Sarah",
-    paidByAvatar: "S",
-    group: "Household",
-    date: "Mar 3, 2024",
-    splitWith: ["John"],
-    status: "pending",
-  },
-  {
-    id: "4",
-    title: "Lunch Order",
-    amount: 78.5,
-    paidBy: "John",
-    paidByAvatar: "JD",
-    group: "Office Lunch",
-    date: "Mar 2, 2024",
-    splitWith: ["Alex", "Emma", "Tom"],
-    status: "settled",
-  },
-  {
-    id: "5",
-    title: "Museum Tickets",
-    amount: 120.0,
-    paidBy: "Lisa",
-    paidByAvatar: "L",
-    group: "Trip to Paris",
-    date: "Mar 1, 2024",
-    splitWith: ["John", "Mike"],
-    status: "pending",
-  },
-]
-
-const balances = [
-  { id: "1", person: "Sarah", avatar: "S", owes: false, amount: 108.23, color: "bg-chart-2" },
-  { id: "2", person: "Mike", avatar: "M", owes: true, amount: 81.67, color: "bg-chart-3" },
-  { id: "3", person: "Lisa", avatar: "L", owes: true, amount: 40.0, color: "bg-chart-4" },
-  { id: "4", person: "Alex", avatar: "A", owes: false, amount: 19.63, color: "bg-chart-5" },
-]
+import { parseISO, isWithinInterval, subMonths, startOfMonth, format as formatDate } from "date-fns"
 
 // Split expense analytics data — enriched with ISO dates and per-person share info
 interface SplitTxn {
@@ -189,21 +103,6 @@ interface SplitTxn {
   status: "settled" | "pending"
 }
 
-const monthlyTrendData = [
-  { month: "Oct", total: 420, yourShare: 210, partnerShare: 210 },
-  { month: "Nov", total: 680, yourShare: 340, partnerShare: 340 },
-  { month: "Dec", total: 950, yourShare: 475, partnerShare: 475 },
-  { month: "Jan", total: 1115, yourShare: 510, partnerShare: 605 },
-  { month: "Feb", total: 1168, yourShare: 584, partnerShare: 584 },
-  { month: "Mar", total: 659, yourShare: 249, partnerShare: 249 },
-]
-
-const prevMonthSummary = { total: 1168.2, yourShare: 584.1, partnerShare: 584.1, youPaid: 750.8, partnerPaid: 417.4 }
-
-const shareChartConfig = {
-  yourShare: { label: "Your Share", color: "var(--chart-1)" },
-  partnerShare: { label: "Partner Share", color: "var(--chart-2)" },
-} satisfies ChartConfig
 
 const trendChartConfig = {
   yourShare: { label: "Your Share", color: "var(--chart-1)" },
@@ -224,25 +123,28 @@ function pct(current: number, previous: number): { value: string; up: boolean } 
 
 function apiToSplitTxn(t: ApiTransaction): SplitTxn | null {
   if (t.splits.length === 0) return null
-  const bhargavSplit = t.splits.find((s) => s.profile?.name === "Bhargav")
-  const partnerSplit = t.splits.find((s) => s.profile?.name !== "Bhargav")
-  if (!bhargavSplit) return null
+  // "You" = the split whose profile is flagged is_owner; fall back to the
+  // first split if no profile in this set is flagged (defensive, mirrors
+  // the backend's analytics_service fallback).
+  const ownerSplit = t.splits.find((s) => s.profile?.is_owner) ?? t.splits[0]
+  const otherSplit = t.splits.find((s) => s.profile?.id !== ownerSplit.profile?.id)
   const paidBy: "you" | "partner" =
-    bhargavSplit.paid_amount > 0 ? "you" : "partner"
+    ownerSplit.paid_amount > 0 ? "you" : "partner"
   return {
     id: t.id,
     date: t.occurred_at.slice(0, 10),
     title: t.title,
     group: t.category?.name ?? "Household",
     totalAmount: t.amount,
-    yourShare: bhargavSplit.share_amount,
-    partnerShare: partnerSplit?.share_amount ?? 0,
+    yourShare: ownerSplit.share_amount,
+    partnerShare: otherSplit?.share_amount ?? 0,
     paidBy,
     status: t.status === "cleared" ? "settled" : "pending",
   }
 }
 
 function AnalyticsTab() {
+  const { format, formatCompact } = useCurrency()
   const defaultRange = DATE_RANGE_PRESETS[2].getRange() // Last 30 days
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange)
   const [sortField, setSortField] = useState<"date" | "amount">("date")
@@ -277,14 +179,44 @@ function AnalyticsTab() {
     return { total, yourShare, partnerShare, youPaid, partnerPaid, outstanding }
   }, [filtered])
 
+  const monthlyTrendData = useMemo(() => {
+    const now = new Date()
+    const months: { month: string; year: number; idx: number }[] = []
+    for (let i = 5; i >= 0; i--) {
+      const d = startOfMonth(subMonths(now, i))
+      months.push({ month: formatDate(d, "MMM"), year: d.getFullYear(), idx: d.getMonth() })
+    }
+    return months.map(({ month, year, idx }) => {
+      const inMonth = allSplitTxns.filter((t) => {
+        const d = parseISO(t.date)
+        return d.getFullYear() === year && d.getMonth() === idx
+      })
+      const total = inMonth.reduce((s, t) => s + t.totalAmount, 0)
+      const yourShare = inMonth.reduce((s, t) => s + t.yourShare, 0)
+      const partnerShare = inMonth.reduce((s, t) => s + t.partnerShare, 0)
+      return { month, total: Math.round(total * 100) / 100, yourShare: Math.round(yourShare * 100) / 100, partnerShare: Math.round(partnerShare * 100) / 100 }
+    })
+  }, [allSplitTxns])
+
+  const prevMonthSummary = useMemo(() => {
+    const prevStart = startOfMonth(subMonths(dateRange.from ?? new Date(), 1))
+    const prevEnd = startOfMonth(dateRange.from ?? new Date())
+    const inPrev = allSplitTxns.filter((t) => {
+      const d = parseISO(t.date)
+      return d >= prevStart && d < prevEnd
+    })
+    return {
+      total: inPrev.reduce((s, t) => s + t.totalAmount, 0),
+      yourShare: inPrev.reduce((s, t) => s + t.yourShare, 0),
+      partnerShare: inPrev.reduce((s, t) => s + t.partnerShare, 0),
+      youPaid: inPrev.filter((t) => t.paidBy === "you").reduce((s, t) => s + t.totalAmount, 0),
+      partnerPaid: inPrev.filter((t) => t.paidBy === "partner").reduce((s, t) => s + t.totalAmount, 0),
+    }
+  }, [allSplitTxns, dateRange])
+
   const shareDistribution = [
     { name: "Your Share", value: summary.yourShare, fill: "var(--chart-1)" },
     { name: "Partner Share", value: summary.partnerShare, fill: "var(--chart-2)" },
-  ]
-
-  const paymentDistribution = [
-    { name: "You", youPaid: summary.youPaid, partnerPaid: 0 },
-    { name: "Partner", youPaid: 0, partnerPaid: summary.partnerPaid },
   ]
 
   const sorted = useMemo(() => {
@@ -333,12 +265,12 @@ function AnalyticsTab() {
       {/* Summary Metrics */}
       <div className="grid gap-4 md:grid-cols-3 lg:grid-cols-6">
         {[
-          { label: "Total Shared", value: `$${summary.total.toFixed(2)}`, sub: `${filtered.length} transactions` },
-          { label: "Your Share", value: `$${summary.yourShare.toFixed(2)}`, sub: `${summary.total > 0 ? ((summary.yourShare / summary.total) * 100).toFixed(1) : 0}% of total` },
-          { label: "Partner Share", value: `$${summary.partnerShare.toFixed(2)}`, sub: `${summary.total > 0 ? ((summary.partnerShare / summary.total) * 100).toFixed(1) : 0}% of total` },
-          { label: "You Paid", value: `$${summary.youPaid.toFixed(2)}`, sub: "upfront total" },
-          { label: "Partner Paid", value: `$${summary.partnerPaid.toFixed(2)}`, sub: "upfront total" },
-          { label: "Outstanding", value: `$${summary.outstanding.toFixed(2)}`, sub: "your pending", valueClass: summary.outstanding > 0 ? "text-warning" : "text-success" },
+          { label: "Total Shared", value: format(summary.total), sub: `${filtered.length} transactions` },
+          { label: "Your Share", value: format(summary.yourShare), sub: `${summary.total > 0 ? ((summary.yourShare / summary.total) * 100).toFixed(1) : 0}% of total` },
+          { label: "Partner Share", value: format(summary.partnerShare), sub: `${summary.total > 0 ? ((summary.partnerShare / summary.total) * 100).toFixed(1) : 0}% of total` },
+          { label: "You Paid", value: format(summary.youPaid), sub: "upfront total" },
+          { label: "Partner Paid", value: format(summary.partnerPaid), sub: "upfront total" },
+          { label: "Outstanding", value: format(summary.outstanding), sub: "your pending", valueClass: summary.outstanding > 0 ? "text-warning" : "text-success" },
         ].map(({ label, value, sub, valueClass }) => (
           <Card key={label}>
             <CardContent className="pt-6">
@@ -375,7 +307,7 @@ function AnalyticsTab() {
                   ))}
                 </Pie>
                 <Tooltip
-                  formatter={(value: number) => [`$${value.toFixed(2)}`, ""]}
+                  formatter={(value: number) => [format(value), ""]}
                   contentStyle={{ background: "var(--popover)", border: "1px solid var(--border)", borderRadius: 8 }}
                   labelStyle={{ color: "var(--foreground)" }}
                 />
@@ -408,7 +340,7 @@ function AnalyticsTab() {
                 margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
               >
                 <XAxis dataKey="name" tickLine={false} axisLine={false} fontSize={12} />
-                <YAxis tickLine={false} axisLine={false} fontSize={12} tickFormatter={(v) => `$${v}`} />
+                <YAxis tickLine={false} axisLine={false} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                 <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                 <Bar dataKey="youPaid" name="You Paid" fill="var(--chart-1)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="partnerPaid" name="Partner Paid" fill="var(--chart-2)" radius={[4, 4, 0, 0]} />
@@ -427,7 +359,7 @@ function AnalyticsTab() {
             <ChartContainer config={trendChartConfig} className="h-[200px] w-full">
               <LineChart data={monthlyTrendData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
-                <YAxis tickLine={false} axisLine={false} fontSize={12} tickFormatter={(v) => `$${v}`} />
+                <YAxis tickLine={false} axisLine={false} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                 <ChartTooltip content={<ChartTooltipContent />} cursor={false} />
                 <Line type="monotone" dataKey="yourShare" stroke="var(--chart-1)" strokeWidth={2} dot={false} />
                 <Line type="monotone" dataKey="partnerShare" stroke="var(--chart-2)" strokeWidth={2} dot={false} />
@@ -452,7 +384,7 @@ function AnalyticsTab() {
             <Card key={label}>
               <CardContent className="pt-6">
                 <p className="text-xs text-muted-foreground">{label}</p>
-                <p className="text-xl font-bold text-foreground mt-0.5">${curr.toFixed(2)}</p>
+                <p className="text-xl font-bold text-foreground mt-0.5">{format(curr)}</p>
                 <div className={`flex items-center gap-1 mt-1 text-xs font-medium ${p.up ? "text-destructive" : "text-success"}`}>
                   {p.up ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
                   {p.up ? "+" : "-"}{p.value} vs last period
@@ -510,9 +442,9 @@ function AnalyticsTab() {
                     <TableCell>
                       <Badge variant="secondary" className="text-xs">{txn.group}</Badge>
                     </TableCell>
-                    <TableCell className="text-right font-semibold tabular-nums">${txn.totalAmount.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums text-chart-1">${txn.yourShare.toFixed(2)}</TableCell>
-                    <TableCell className="text-right tabular-nums text-chart-2">${txn.partnerShare.toFixed(2)}</TableCell>
+                    <TableCell className="text-right font-semibold tabular-nums">{format(txn.totalAmount)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-chart-1">{format(txn.yourShare)}</TableCell>
+                    <TableCell className="text-right tabular-nums text-chart-2">{format(txn.partnerShare)}</TableCell>
                     <TableCell>
                       <Badge
                         variant="secondary"
@@ -544,14 +476,274 @@ function AnalyticsTab() {
   )
 }
 
-export default function SharedExpensesPage() {
-  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
-  const [isAddGroupOpen, setIsAddGroupOpen] = useState(false)
-  const [splitSummary, setSplitSummary] = useState<SplitSummary | null>(null)
+interface SharedExpense {
+  id: string
+  title: string
+  amount: number
+  paidByName: string
+  category: string
+  date: string
+  status: "settled" | "pending"
+}
+
+function apiToSharedExpense(t: ApiTransaction): SharedExpense | null {
+  if (t.splits.length === 0) return null
+  const payer = t.splits.find((s) => s.paid_amount > 0)?.profile?.name ?? "—"
+  return {
+    id: t.id,
+    title: t.title,
+    amount: t.amount,
+    paidByName: payer,
+    category: t.category?.name ?? "Shared",
+    date: new Date(t.occurred_at).toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" }),
+    status: t.status === "cleared" ? "settled" : "pending",
+  }
+}
+
+function AddExpenseDialog({
+  open,
+  onClose,
+  onCreated,
+  profiles,
+  accounts,
+  categories,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: () => void
+  profiles: Profile[]
+  accounts: Account[]
+  categories: Category[]
+}) {
+  const [title, setTitle] = useState("")
+  const [amount, setAmount] = useState("")
+  const [accountId, setAccountId] = useState("")
+  const [categoryId, setCategoryId] = useState("none")
+  const [paidByProfileId, setPaidByProfileId] = useState("")
+  const [participantIds, setParticipantIds] = useState<string[]>([])
+  const [splitMethod, setSplitMethod] = useState<"equal" | "custom">("equal")
+  const [customShares, setCustomShares] = useState<Record<string, string>>({})
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  const expenseCategories = categories.filter((c) => !c.is_income)
 
   useEffect(() => {
-    fetchSplitSummary().then(setSplitSummary).catch(console.error)
+    if (open) {
+      setAccountId((prev) => prev || accounts[0]?.id || "")
+      setPaidByProfileId((prev) => prev || profiles.find((p) => p.is_owner)?.id || profiles[0]?.id || "")
+      setParticipantIds((prev) => (prev.length > 0 ? prev : profiles.map((p) => p.id)))
+    }
+  }, [open, accounts, profiles])
+
+  const toggleParticipant = (id: string) => {
+    setParticipantIds((prev) => (prev.includes(id) ? prev.filter((x) => x !== id) : [...prev, id]))
+  }
+
+  const customTotal = participantIds.reduce((sum, id) => sum + (parseFloat(customShares[id]) || 0), 0)
+
+  const handleSubmit = async () => {
+    if (!title.trim()) { setError("Description is required"); return }
+    const amt = parseFloat(amount)
+    if (!amt || amt <= 0) { setError("Enter a valid amount > 0"); return }
+    if (!accountId) { setError("Select an account"); return }
+    if (participantIds.length < 2) { setError("Select at least two people to split this expense between"); return }
+
+    const shares: Record<string, number> = {}
+    if (splitMethod === "equal") {
+      const equalShare = amt / participantIds.length
+      participantIds.forEach((id) => { shares[id] = equalShare })
+    } else {
+      if (Math.abs(customTotal - amt) > 0.01) {
+        setError(`Custom shares must add up to ${amt.toFixed(2)} (currently ${customTotal.toFixed(2)})`)
+        return
+      }
+      participantIds.forEach((id) => { shares[id] = parseFloat(customShares[id]) || 0 })
+    }
+
+    setSaving(true)
+    setError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      await createTransaction({
+        household_id: householdId,
+        account_id: accountId,
+        title: title.trim(),
+        amount: amt,
+        type: "expense",
+        occurred_at: new Date().toISOString(),
+        category_id: categoryId !== "none" ? categoryId : undefined,
+        created_by_profile_id: paidByProfileId,
+        splits: participantIds.map((id) => ({
+          profile_id: id,
+          share_amount: shares[id],
+          paid_amount: id === paidByProfileId ? amt : 0,
+        })),
+      })
+      onCreated()
+      setTitle(""); setAmount(""); setCategoryId("none"); setCustomShares({}); setSplitMethod("equal")
+      setAccountId(""); setPaidByProfileId(""); setParticipantIds([])
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to add expense")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Shared Expense</DialogTitle>
+          <DialogDescription>Add an expense and split it between two household members</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="space-y-2">
+            <Label>Description</Label>
+            <Input placeholder="What was the expense for?" value={title} onChange={(e) => setTitle(e.target.value)} />
+          </div>
+          <div className="grid grid-cols-2 gap-4">
+            <div className="space-y-2">
+              <Label>Amount</Label>
+              <Input type="number" step="0.01" placeholder="0.00" value={amount} onChange={(e) => setAmount(e.target.value)} />
+            </div>
+            <div className="space-y-2">
+              <Label>Account</Label>
+              <Select value={accountId} onValueChange={setAccountId}>
+                <SelectTrigger>
+                  <SelectValue placeholder="Select account" />
+                </SelectTrigger>
+                <SelectContent>
+                  {accounts.map((a) => (
+                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                  ))}
+                </SelectContent>
+              </Select>
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Category</Label>
+            <Select value={categoryId} onValueChange={setCategoryId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Select category" />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="none">No category</SelectItem>
+                {expenseCategories.map((c) => (
+                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Paid By</Label>
+            <Select value={paidByProfileId} onValueChange={setPaidByProfileId}>
+              <SelectTrigger>
+                <SelectValue placeholder="Who paid?" />
+              </SelectTrigger>
+              <SelectContent>
+                {profiles.map((p) => (
+                  <SelectItem key={p.id} value={p.id}>{p.name}</SelectItem>
+                ))}
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Split Between</Label>
+            <div className="space-y-2 rounded-lg border border-border/50 p-3">
+              {profiles.map((p) => (
+                <div key={p.id} className="flex items-center gap-2">
+                  <Checkbox
+                    id={`participant-${p.id}`}
+                    checked={participantIds.includes(p.id)}
+                    onCheckedChange={() => toggleParticipant(p.id)}
+                  />
+                  <Label htmlFor={`participant-${p.id}`} className="font-normal cursor-pointer">{p.name}</Label>
+                </div>
+              ))}
+            </div>
+          </div>
+          <div className="space-y-2">
+            <Label>Split Method</Label>
+            <Select value={splitMethod} onValueChange={(v) => setSplitMethod(v as "equal" | "custom")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="equal">Split Equally</SelectItem>
+                <SelectItem value="custom">Custom Amounts</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          {splitMethod === "custom" && (
+            <div className="space-y-2">
+              <Label>Each person&apos;s share (must total {amount || "0.00"})</Label>
+              {participantIds.map((id) => {
+                const profile = profiles.find((p) => p.id === id)
+                return (
+                  <div key={id} className="flex items-center gap-2">
+                    <span className="w-24 text-sm text-muted-foreground">{profile?.name}</span>
+                    <Input
+                      type="number"
+                      step="0.01"
+                      placeholder="0.00"
+                      value={customShares[id] ?? ""}
+                      onChange={(e) => setCustomShares((prev) => ({ ...prev, [id]: e.target.value }))}
+                    />
+                  </div>
+                )
+              })}
+              <p className="text-xs text-muted-foreground">Total: {customTotal.toFixed(2)}</p>
+            </div>
+          )}
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>{saving ? "Adding..." : "Add Expense"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
+export default function SharedExpensesPage() {
+  const { format } = useCurrency()
+  const [isAddExpenseOpen, setIsAddExpenseOpen] = useState(false)
+  const [splitSummary, setSplitSummary] = useState<SplitSummary | null>(null)
+  const [partnerBalances, setPartnerBalances] = useState<PartnerBalance[]>([])
+  const [settlements, setSettlements] = useState<Settlement[]>([])
+  const [profiles, setProfiles] = useState<Profile[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
+  const [categories, setCategories] = useState<Category[]>([])
+  const [sharedExpenses, setSharedExpenses] = useState<SharedExpense[]>([])
+
+  const loadAll = useCallback(() => {
+    Promise.all([
+      fetchSplitSummary(),
+      fetchBalancesByPartner(),
+      fetchSettlements(),
+      fetchProfiles(),
+      fetchAccounts(),
+      fetchCategories(),
+      fetchTransactions({ limit: 500, offset: 0 }),
+    ])
+      .then(([summary, balances, settles, profs, accts, cats, txns]) => {
+        setSplitSummary(summary)
+        setPartnerBalances(balances)
+        setSettlements(settles)
+        setProfiles(profs)
+        setAccounts(accts)
+        setCategories(cats)
+        setSharedExpenses(
+          txns.items.map(apiToSharedExpense).filter((e): e is SharedExpense => e !== null)
+        )
+      })
+      .catch(console.error)
   }, [])
+
+  useEffect(() => { loadAll() }, [loadAll])
 
   // net_balance > 0 means partner owes you (you are owed)
   // net_balance < 0 means you owe partner
@@ -559,109 +751,45 @@ export default function SharedExpensesPage() {
   const totalOwed = netBalance > 0 ? netBalance : 0
   const totalOwing = netBalance < 0 ? Math.abs(netBalance) : 0
 
+  // "You" = the is_owner-flagged profile; fall back to the first profile if
+  // none is flagged (defensive, mirrors the backend's analytics fallback).
+  const you = profiles.find((p) => p.is_owner) ?? profiles[0]
+  const [settlingWithId, setSettlingWithId] = useState<string | null>(null)
+
+  const handleSettleUpWith = async (partner: PartnerBalance) => {
+    if (!you || partner.net_balance === 0) return
+    setSettlingWithId(partner.profile_id)
+    try {
+      const householdId = await fetchHouseholdId()
+      // net_balance > 0: this person owes you, so they pay you to settle.
+      const [fromId, toId] = partner.net_balance > 0 ? [partner.profile_id, you.id] : [you.id, partner.profile_id]
+      await createSettlement({
+        household_id: householdId,
+        from_profile_id: fromId,
+        to_profile_id: toId,
+        amount: Math.abs(partner.net_balance),
+      })
+      loadAll()
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to settle up")
+    } finally {
+      setSettlingWithId(null)
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Shared Expenses</h1>
           <p className="text-sm text-muted-foreground">
-            Split bills and track shared costs with friends and family
+            Split bills and track shared costs with your partner
           </p>
         </div>
-        <div className="flex items-center gap-2">
-          <Dialog open={isAddGroupOpen} onOpenChange={setIsAddGroupOpen}>
-            <DialogTrigger asChild>
-              <Button variant="outline" size="sm">
-                <UserPlus className="mr-2 h-4 w-4" />
-                New Group
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Create New Group</DialogTitle>
-                <DialogDescription>Add a group to share expenses with</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="groupName">Group Name</Label>
-                  <Input id="groupName" placeholder="e.g., Roommates, Trip" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="groupType">Type</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select type" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="household">Household</SelectItem>
-                      <SelectItem value="trip">Trip</SelectItem>
-                      <SelectItem value="project">Project</SelectItem>
-                      <SelectItem value="other">Other</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddGroupOpen(false)}>Cancel</Button>
-                <Button onClick={() => setIsAddGroupOpen(false)}>Create Group</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-          <Dialog open={isAddExpenseOpen} onOpenChange={setIsAddExpenseOpen}>
-            <DialogTrigger asChild>
-              <Button size="sm">
-                <Plus className="mr-2 h-4 w-4" />
-                Add Expense
-              </Button>
-            </DialogTrigger>
-            <DialogContent>
-              <DialogHeader>
-                <DialogTitle>Add Shared Expense</DialogTitle>
-                <DialogDescription>Add an expense to split with others</DialogDescription>
-              </DialogHeader>
-              <div className="space-y-4 py-4">
-                <div className="space-y-2">
-                  <Label htmlFor="expenseTitle">Description</Label>
-                  <Input id="expenseTitle" placeholder="What was the expense for?" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expenseAmount">Amount</Label>
-                  <Input id="expenseAmount" type="number" placeholder="0.00" />
-                </div>
-                <div className="space-y-2">
-                  <Label htmlFor="expenseGroup">Group</Label>
-                  <Select>
-                    <SelectTrigger>
-                      <SelectValue placeholder="Select group" />
-                    </SelectTrigger>
-                    <SelectContent>
-                      {groups.map((group) => (
-                        <SelectItem key={group.id} value={group.id}>{group.name}</SelectItem>
-                      ))}
-                    </SelectContent>
-                  </Select>
-                </div>
-                <div className="space-y-2">
-                  <Label>Split Method</Label>
-                  <Select defaultValue="equal">
-                    <SelectTrigger>
-                      <SelectValue />
-                    </SelectTrigger>
-                    <SelectContent>
-                      <SelectItem value="equal">Split Equally</SelectItem>
-                      <SelectItem value="percentage">By Percentage</SelectItem>
-                      <SelectItem value="custom">Custom Amounts</SelectItem>
-                    </SelectContent>
-                  </Select>
-                </div>
-              </div>
-              <DialogFooter>
-                <Button variant="outline" onClick={() => setIsAddExpenseOpen(false)}>Cancel</Button>
-                <Button onClick={() => setIsAddExpenseOpen(false)}>Add Expense</Button>
-              </DialogFooter>
-            </DialogContent>
-          </Dialog>
-        </div>
+        <Button size="sm" onClick={() => setIsAddExpenseOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Expense
+        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-3">
@@ -670,7 +798,7 @@ export default function SharedExpensesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">You Are Owed</p>
-                <p className="text-2xl font-bold text-success">+${totalOwed.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-success">{format(totalOwed)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
                 <DollarSign className="h-5 w-5 text-success" />
@@ -683,7 +811,7 @@ export default function SharedExpensesPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">You Owe</p>
-                <p className="text-2xl font-bold text-destructive">-${totalOwing.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-destructive">{format(-totalOwing)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
                 <Receipt className="h-5 w-5 text-destructive" />
@@ -697,7 +825,7 @@ export default function SharedExpensesPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Net Balance</p>
                 <p className="text-2xl font-bold text-foreground">
-                  ${(totalOwed - totalOwing).toFixed(2)}
+                  {format(totalOwed - totalOwing)}
                 </p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -708,182 +836,154 @@ export default function SharedExpensesPage() {
         </Card>
       </div>
 
-      <div className="grid gap-6 lg:grid-cols-3">
-        <div className="space-y-4">
-          <h2 className="text-lg font-semibold text-foreground">Groups</h2>
-          {groups.map((group) => (
-            <Card key={group.id} className="transition-colors hover:bg-muted/30">
-              <CardContent className="pt-6">
-                <div className="flex items-start justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-muted">
-                      <Users className="h-5 w-5 text-muted-foreground" />
-                    </div>
-                    <div>
-                      <p className="font-medium text-foreground">{group.name}</p>
-                      <div className="flex items-center gap-1 mt-1">
-                        <div className="flex -space-x-2">
-                          {group.members.slice(0, 3).map((member, i) => (
-                            <Avatar key={i} className="h-5 w-5 border-2 border-background">
-                              <AvatarFallback className={`${member.color} text-[10px] text-white`}>
-                                {member.avatar}
-                              </AvatarFallback>
-                            </Avatar>
-                          ))}
+      <Tabs defaultValue="expenses" className="space-y-4">
+        <TabsList>
+          <TabsTrigger value="expenses">Recent Expenses</TabsTrigger>
+          <TabsTrigger value="balances">Balances</TabsTrigger>
+          <TabsTrigger value="analytics">
+            <Activity className="mr-1.5 h-3.5 w-3.5" />
+            Analytics
+          </TabsTrigger>
+        </TabsList>
+
+        <TabsContent value="expenses" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Shared Expenses</CardTitle>
+              <CardDescription>All your shared expenses</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-2">
+              {sharedExpenses.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">No shared expenses yet.</p>
+              ) : (
+                sharedExpenses.map((expense) => (
+                  <div
+                    key={expense.id}
+                    className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
+                  >
+                    <div className="flex items-center gap-4">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-primary/10 text-primary text-sm">
+                          {expense.paidByName.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-foreground">{expense.title}</p>
+                        <div className="flex items-center gap-2 text-xs text-muted-foreground">
+                          <span>Paid by {expense.paidByName}</span>
+                          <span>•</span>
+                          <span>{expense.category}</span>
+                          <span>•</span>
+                          <span>{expense.date}</span>
                         </div>
-                        <span className="text-xs text-muted-foreground ml-1">
-                          {group.members.length} members
-                        </span>
                       </div>
+                    </div>
+                    <div className="text-right">
+                      <p className="text-sm font-semibold tabular-nums text-foreground">
+                        {format(expense.amount)}
+                      </p>
+                      <Badge
+                        variant="secondary"
+                        className={
+                          expense.status === "settled"
+                            ? "bg-success/10 text-success"
+                            : "bg-warning/10 text-warning"
+                        }
+                      >
+                        {expense.status === "settled" ? (
+                          <Check className="mr-1 h-3 w-3" />
+                        ) : (
+                          <Clock className="mr-1 h-3 w-3" />
+                        )}
+                        {expense.status}
+                      </Badge>
                     </div>
                   </div>
-                  <div className="text-right">
-                    <span
-                      className={`text-sm font-semibold tabular-nums ${
-                        group.balance >= 0 ? "text-success" : "text-destructive"
-                      }`}
-                    >
-                      {group.balance >= 0 ? "+" : ""}${Math.abs(group.balance).toFixed(2)}
-                    </span>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
-        </div>
+                ))
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
 
-        <div className="lg:col-span-2">
-          <Tabs defaultValue="expenses" className="space-y-4">
-            <TabsList>
-              <TabsTrigger value="expenses">Recent Expenses</TabsTrigger>
-              <TabsTrigger value="balances">Balances</TabsTrigger>
-              <TabsTrigger value="analytics">
-                <Activity className="mr-1.5 h-3.5 w-3.5" />
-                Analytics
-              </TabsTrigger>
-            </TabsList>
-
-            <TabsContent value="expenses" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold">Shared Expenses</CardTitle>
-                  <CardDescription>All your shared expenses</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {expenses.map((expense) => (
-                    <div
-                      key={expense.id}
-                      className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
-                    >
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-10 w-10">
-                          <AvatarFallback className="bg-primary/10 text-primary text-sm">
-                            {expense.paidByAvatar}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium text-foreground">{expense.title}</p>
-                          <div className="flex items-center gap-2 text-xs text-muted-foreground">
-                            <span>Paid by {expense.paidBy}</span>
-                            <span>•</span>
-                            <span>{expense.group}</span>
-                            <span>•</span>
-                            <span>{expense.date}</span>
-                          </div>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-4">
-                        <div className="text-right">
-                          <p className="text-sm font-semibold tabular-nums text-foreground">
-                            ${expense.amount.toFixed(2)}
-                          </p>
-                          <Badge
-                            variant="secondary"
-                            className={
-                              expense.status === "settled"
-                                ? "bg-success/10 text-success"
-                                : "bg-warning/10 text-warning"
-                            }
-                          >
-                            {expense.status === "settled" ? (
-                              <Check className="mr-1 h-3 w-3" />
-                            ) : (
-                              <Clock className="mr-1 h-3 w-3" />
-                            )}
-                            {expense.status}
-                          </Badge>
-                        </div>
-                        <DropdownMenu>
-                          <DropdownMenuTrigger asChild>
-                            <Button variant="ghost" size="icon" className="h-8 w-8">
-                              <MoreHorizontal className="h-4 w-4" />
-                            </Button>
-                          </DropdownMenuTrigger>
-                          <DropdownMenuContent align="end">
-                            <DropdownMenuItem>View Details</DropdownMenuItem>
-                            <DropdownMenuItem>Edit</DropdownMenuItem>
-                            <DropdownMenuItem>Mark as Settled</DropdownMenuItem>
-                            <DropdownMenuSeparator />
-                            <DropdownMenuItem className="text-destructive">Delete</DropdownMenuItem>
-                          </DropdownMenuContent>
-                        </DropdownMenu>
+        <TabsContent value="balances" className="space-y-4">
+          <Card>
+            <CardHeader>
+              <CardTitle className="text-base font-semibold">Settlement Summary</CardTitle>
+              <CardDescription>Your balance with each household member individually</CardDescription>
+            </CardHeader>
+            <CardContent className="space-y-3">
+              {partnerBalances.length === 0 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">All settled up!</p>
+              ) : (
+                partnerBalances.map((p) => (
+                  <div key={p.profile_id} className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/30 p-4">
+                    <div className="flex items-center gap-4">
+                      <Avatar className="h-10 w-10">
+                        <AvatarFallback className="bg-chart-2 text-white">
+                          {p.profile_name.slice(0, 2).toUpperCase()}
+                        </AvatarFallback>
+                      </Avatar>
+                      <div>
+                        <p className="font-medium text-foreground">{p.profile_name}</p>
+                        <p className="text-xs text-muted-foreground">
+                          {p.net_balance === 0 ? "settled up" : p.net_balance > 0 ? "owes you" : "you owe"}
+                        </p>
                       </div>
                     </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </TabsContent>
-
-            <TabsContent value="balances" className="space-y-4">
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold">Settlement Summary</CardTitle>
-                  <CardDescription>Outstanding balances with others</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-3">
-                  {balances.map((balance) => (
-                    <div
-                      key={balance.id}
-                      className="flex items-center justify-between rounded-lg border border-border/50 bg-muted/30 p-4"
-                    >
-                      <div className="flex items-center gap-4">
-                        <Avatar className="h-10 w-10">
-                          <AvatarFallback className={`${balance.color} text-white`}>
-                            {balance.avatar}
-                          </AvatarFallback>
-                        </Avatar>
-                        <div>
-                          <p className="font-medium text-foreground">{balance.person}</p>
-                          <p className="text-xs text-muted-foreground">
-                            {balance.owes ? "owes you" : "you owe"}
-                          </p>
-                        </div>
-                      </div>
-                      <div className="flex items-center gap-3">
-                        <span
-                          className={`text-lg font-semibold tabular-nums ${
-                            balance.owes ? "text-destructive" : "text-success"
-                          }`}
+                    <div className="flex items-center gap-3">
+                      <span className={`text-lg font-semibold tabular-nums ${p.net_balance > 0 ? "text-success" : p.net_balance < 0 ? "text-destructive" : "text-muted-foreground"}`}>
+                        {format(p.net_balance, { signDisplay: "exceptZero" })}
+                      </span>
+                      {p.net_balance !== 0 && (
+                        <Button
+                          variant="outline"
+                          size="sm"
+                          onClick={() => handleSettleUpWith(p)}
+                          disabled={settlingWithId === p.profile_id}
                         >
-                          {balance.owes ? "-" : "+"}${balance.amount.toFixed(2)}
-                        </span>
-                        <Button variant="outline" size="sm">
-                          {balance.owes ? "Request" : "Settle"}
+                          {settlingWithId === p.profile_id ? "Settling..." : "Settle Up"}
                           <ArrowRight className="ml-1 h-3 w-3" />
                         </Button>
-                      </div>
+                      )}
                     </div>
-                  ))}
-                </CardContent>
-              </Card>
-            </TabsContent>
+                  </div>
+                ))
+              )}
 
-            <TabsContent value="analytics">
-              <AnalyticsTab />
-            </TabsContent>
-          </Tabs>
-        </div>
-      </div>
+              {settlements.length > 0 && (
+                <div className="pt-4">
+                  <h3 className="text-xs font-medium text-muted-foreground uppercase tracking-wider mb-2">
+                    Settlement History
+                  </h3>
+                  <div className="space-y-2">
+                    {settlements.map((s) => (
+                      <div key={s.id} className="flex items-center justify-between rounded-lg bg-muted/30 px-3 py-2 text-sm">
+                        <span className="text-muted-foreground">
+                          {s.from_profile?.name ?? "—"} → {s.to_profile?.name ?? "—"}
+                        </span>
+                        <span className="font-medium text-foreground">{format(s.amount)}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              )}
+            </CardContent>
+          </Card>
+        </TabsContent>
+
+        <TabsContent value="analytics">
+          <AnalyticsTab />
+        </TabsContent>
+      </Tabs>
+
+      <AddExpenseDialog
+        open={isAddExpenseOpen}
+        onClose={() => setIsAddExpenseOpen(false)}
+        onCreated={loadAll}
+        profiles={profiles}
+        accounts={accounts}
+        categories={categories}
+      />
     </div>
   )
 }

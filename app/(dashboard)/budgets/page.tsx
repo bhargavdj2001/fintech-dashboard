@@ -1,16 +1,23 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { useCurrency } from "@/lib/currency"
 import {
   fetchBudgets,
   fetchCategories,
   fetchHouseholdId,
   createBudget,
+  createCategory,
   updateBudget,
   deleteBudget,
+  fetchTransactions,
+  fetchPeriodReport,
   type Budget as ApiBudget,
   type Category,
+  type Transaction,
 } from "@/lib/api"
+import { subMonths, startOfMonth, parseISO, format as formatDate } from "date-fns"
 import {
   Plus,
   MoreHorizontal,
@@ -20,6 +27,7 @@ import {
   CheckCircle2,
   Edit,
   Trash2,
+  ListFilter,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -49,8 +57,15 @@ import {
   SelectTrigger,
   SelectValue,
 } from "@/components/ui/select"
-import { Bar, BarChart, ResponsiveContainer, XAxis, YAxis, Tooltip } from "recharts"
+import { Bar, BarChart, XAxis, YAxis, Tooltip } from "recharts"
 import { ChartConfig, ChartContainer, ChartTooltipContent } from "@/components/ui/chart"
+import {
+  Sheet,
+  SheetContent,
+  SheetDescription,
+  SheetHeader,
+  SheetTitle,
+} from "@/components/ui/sheet"
 
 const BUDGET_COLORS = [
   "bg-chart-1",
@@ -67,6 +82,8 @@ function apiBudgetToUi(b: ApiBudget, idx: number) {
     categoryId: b.category_id,
     name: b.name,
     budget: b.amount,
+    rolloverAmount: b.rollover_amount,
+    effectiveBudget: b.effective_amount,
     spent: b.spent,
     icon: "💰",
     color: BUDGET_COLORS[idx % BUDGET_COLORS.length],
@@ -75,14 +92,6 @@ function apiBudgetToUi(b: ApiBudget, idx: number) {
 
 type UiBudget = ReturnType<typeof apiBudgetToUi>
 
-const monthlyData = [
-  { month: "Oct", budgeted: 3600, spent: 3200 },
-  { month: "Nov", budgeted: 3600, spent: 3450 },
-  { month: "Dec", budgeted: 3600, spent: 3050 },
-  { month: "Jan", budgeted: 3600, spent: 3800 },
-  { month: "Feb", budgeted: 3600, spent: 3300 },
-  { month: "Mar", budgeted: 3600, spent: 3550 },
-]
 
 const chartConfig = {
   budgeted: { label: "Budgeted", color: "var(--chart-1)" },
@@ -94,11 +103,13 @@ function CreateBudgetDialog({
   onClose,
   onCreated,
   categories,
+  onCategoryCreated,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (b: UiBudget) => void
   categories: Category[]
+  onCategoryCreated: (category: Category) => void
 }) {
   const [name, setName] = useState("")
   const [amount, setAmount] = useState("")
@@ -106,8 +117,28 @@ function CreateBudgetDialog({
   const [periodType, setPeriodType] = useState("monthly")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [addingCategory, setAddingCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState("")
 
   const expenseCategories = categories.filter((c) => !c.is_income)
+
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) return
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createCategory({
+        household_id: householdId,
+        name: newCategoryName.trim(),
+        is_income: false,
+      })
+      onCategoryCreated(created)
+      setCategoryId(created.id)
+      setNewCategoryName("")
+      setAddingCategory(false)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create category")
+    }
+  }
 
   const handleSubmit = async () => {
     if (!name.trim()) { setError("Name is required"); return }
@@ -129,6 +160,9 @@ function CreateBudgetDialog({
       setAmount("")
       setCategoryId("none")
       setPeriodType("monthly")
+      setAddingCategory(false)
+      setNewCategoryName("")
+      setError("")
       onClose()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create budget")
@@ -152,17 +186,34 @@ function CreateBudgetDialog({
           </div>
           <div className="space-y-2">
             <Label>Category</Label>
-            <Select value={categoryId} onValueChange={setCategoryId}>
-              <SelectTrigger>
-                <SelectValue placeholder="Select category" />
-              </SelectTrigger>
-              <SelectContent>
-                <SelectItem value="none">No category</SelectItem>
-                {expenseCategories.map((c) => (
-                  <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                ))}
-              </SelectContent>
-            </Select>
+            {addingCategory ? (
+              <div className="flex items-center gap-2">
+                <Input
+                  placeholder="New category name"
+                  value={newCategoryName}
+                  onChange={(e) => setNewCategoryName(e.target.value)}
+                  autoFocus
+                />
+                <Button type="button" size="sm" onClick={handleCreateCategory}>Add</Button>
+                <Button type="button" size="sm" variant="outline" onClick={() => setAddingCategory(false)}>Cancel</Button>
+              </div>
+            ) : (
+              <Select
+                value={categoryId}
+                onValueChange={(v) => { if (v === "__add_new__") setAddingCategory(true); else setCategoryId(v) }}
+              >
+                <SelectTrigger>
+                  <SelectValue placeholder="Select category" />
+                </SelectTrigger>
+                <SelectContent>
+                  <SelectItem value="none">No category</SelectItem>
+                  {expenseCategories.map((c) => (
+                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                  ))}
+                  <SelectItem value="__add_new__" className="text-primary">+ Add new category…</SelectItem>
+                </SelectContent>
+              </Select>
+            )}
           </div>
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -288,12 +339,88 @@ function EditBudgetDialog({
   )
 }
 
+function BudgetDrillSheet({
+  budget,
+  open,
+  onClose,
+}: {
+  budget: UiBudget | null
+  open: boolean
+  onClose: () => void
+}) {
+  const { format } = useCurrency()
+  const [txns, setTxns] = useState<Transaction[]>([])
+  const [loading, setLoading] = useState(false)
+
+  useEffect(() => {
+    if (!open || !budget?.categoryId) return
+    setLoading(true)
+    fetchTransactions({ category_id: budget.categoryId, limit: 50, offset: 0 })
+      .then((res) => setTxns(res.items))
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [open, budget])
+
+  if (!budget) return null
+
+  return (
+    <Sheet open={open} onOpenChange={(v) => !v && onClose()}>
+      <SheetContent className="w-full sm:max-w-md overflow-y-auto">
+        <SheetHeader className="mb-4">
+          <SheetTitle>{budget.category} — Transactions</SheetTitle>
+          <SheetDescription>
+            {format(budget.spent)} spent of {format(budget.effectiveBudget || budget.budget)}
+          </SheetDescription>
+        </SheetHeader>
+        {loading ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">Loading…</p>
+        ) : txns.length === 0 ? (
+          <p className="py-8 text-center text-sm text-muted-foreground">
+            {budget.categoryId ? "No transactions found for this budget." : "This budget has no linked category."}
+          </p>
+        ) : (
+          <div className="divide-y divide-border">
+            {txns.map((t) => (
+              <div key={t.id} className="flex items-center justify-between py-3">
+                <div className="min-w-0 flex-1">
+                  <p className="truncate text-sm font-medium text-foreground">{t.title}</p>
+                  <p className="text-xs text-muted-foreground">
+                    {new Date(t.occurred_at).toLocaleDateString()}
+                    {t.merchant ? ` · ${t.merchant}` : ""}
+                  </p>
+                </div>
+                <span className="ml-4 tabular-nums text-sm font-semibold text-destructive">
+                  {format(Math.abs(t.amount))}
+                </span>
+              </div>
+            ))}
+          </div>
+        )}
+      </SheetContent>
+    </Sheet>
+  )
+}
+
 export default function BudgetsPage() {
+  const { format, formatCompact } = useCurrency()
   const [isAddDialogOpen, setIsAddDialogOpen] = useState(false)
   const [editBudget, setEditBudget] = useState<UiBudget | null>(null)
+  const [drillBudget, setDrillBudget] = useState<UiBudget | null>(null)
   const [budgets, setBudgets] = useState<UiBudget[]>([])
   const [categories, setCategories] = useState<Category[]>([])
   const [loading, setLoading] = useState(true)
+  const [periodTxns, setPeriodTxns] = useState<{ occurred_at: string; type: string; amount: number }[]>([])
+
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      setIsAddDialogOpen(true)
+      router.replace(pathname, { scroll: false })
+    }
+  }, [searchParams, pathname, router])
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -308,10 +435,35 @@ export default function BudgetsPage() {
 
   useEffect(() => { loadData() }, [loadData])
 
+  useEffect(() => {
+    const startDate = startOfMonth(subMonths(new Date(), 6)).toISOString()
+    fetchPeriodReport({ start_date: startDate })
+      .then((r) => setPeriodTxns(r.transactions))
+      .catch(console.error)
+  }, [])
+
   const totalBudget = budgets.reduce((acc, b) => acc + b.budget, 0)
   const totalSpent = budgets.reduce((acc, b) => acc + b.spent, 0)
   const overBudget = budgets.filter((b) => b.spent > b.budget).length
   const underBudget = budgets.filter((b) => b.spent <= b.budget * 0.8).length
+
+  const monthlyData = useMemo(() => {
+    const now = new Date()
+    const months: { month: string; year: number; idx: number }[] = []
+    for (let i = 5; i >= 0; i--) {
+      const d = startOfMonth(subMonths(now, i))
+      months.push({ month: formatDate(d, "MMM"), year: d.getFullYear(), idx: d.getMonth() })
+    }
+    return months.map(({ month, year, idx }) => {
+      const spent = periodTxns
+        .filter((t) => {
+          const d = parseISO(t.occurred_at)
+          return t.type === "expense" && d.getFullYear() === year && d.getMonth() === idx
+        })
+        .reduce((s, t) => s + Math.abs(t.amount), 0)
+      return { month, budgeted: totalBudget, spent: Math.round(spent * 100) / 100 }
+    })
+  }, [periodTxns, totalBudget])
 
   const handleCreated = (b: UiBudget) => setBudgets((prev) => [b, ...prev])
 
@@ -346,7 +498,7 @@ export default function BudgetsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Budget</p>
-                <p className="text-2xl font-bold text-foreground">${totalBudget.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-foreground">{format(totalBudget)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                 <span className="text-lg">💰</span>
@@ -359,7 +511,7 @@ export default function BudgetsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Spent</p>
-                <p className="text-2xl font-bold text-foreground">${totalSpent.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-foreground">{format(totalSpent)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-chart-4/10">
                 <span className="text-lg">💸</span>
@@ -405,7 +557,7 @@ export default function BudgetsPage() {
             <ChartContainer config={chartConfig} className="h-[300px] w-full">
               <BarChart data={monthlyData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v / 1000}k`} />
+                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                 <Tooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                 <Bar dataKey="budgeted" fill="var(--color-budgeted)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="spent" fill="var(--color-spent)" radius={[4, 4, 0, 0]} />
@@ -434,7 +586,7 @@ export default function BudgetsPage() {
                   <span className="text-muted-foreground">Remaining</span>
                 </div>
                 <span className="font-medium text-foreground">
-                  ${Math.max(0, totalBudget - totalSpent).toLocaleString()}
+                  {format(Math.max(0, totalBudget - totalSpent))}
                 </span>
               </div>
               <div className="flex items-center justify-between text-sm">
@@ -462,9 +614,10 @@ export default function BudgetsPage() {
           ) : (
             <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-4">
               {budgets.map((budget) => {
-                const percentage = budget.budget > 0 ? Math.min((budget.spent / budget.budget) * 100, 100) : 0
-                const isOverBudget = budget.spent > budget.budget
-                const remaining = budget.budget - budget.spent
+                const effective = budget.effectiveBudget || budget.budget
+                const percentage = effective > 0 ? Math.min((budget.spent / effective) * 100, 100) : 0
+                const isOverBudget = budget.spent > effective
+                const remaining = effective - budget.spent
 
                 return (
                   <Card key={budget.id} className="relative overflow-hidden">
@@ -486,6 +639,10 @@ export default function BudgetsPage() {
                             </Button>
                           </DropdownMenuTrigger>
                           <DropdownMenuContent align="end">
+                            <DropdownMenuItem onClick={() => setDrillBudget(budget)}>
+                              <ListFilter className="mr-2 h-4 w-4" />
+                              View Transactions
+                            </DropdownMenuItem>
                             <DropdownMenuItem onClick={() => setEditBudget(budget)}>
                               <Edit className="mr-2 h-4 w-4" />
                               Edit Budget
@@ -505,10 +662,15 @@ export default function BudgetsPage() {
                       <div className="mt-4 space-y-2">
                         <div className="flex items-center justify-between text-sm">
                           <span className={`font-semibold tabular-nums ${isOverBudget ? "text-destructive" : "text-foreground"}`}>
-                            ${budget.spent.toLocaleString()}
+                            {format(budget.spent)}
                           </span>
-                          <span className="text-muted-foreground">/ ${budget.budget.toLocaleString()}</span>
+                          <span className="text-muted-foreground">/ {format(effective)}</span>
                         </div>
+                        {budget.rolloverAmount > 0 && (
+                          <p className="text-xs text-muted-foreground">
+                            {format(budget.budget)} + {format(budget.rolloverAmount)} rolled over
+                          </p>
+                        )}
                         <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
                           <div
                             className={`h-full rounded-full transition-all ${isOverBudget ? "bg-destructive" : budget.color}`}
@@ -521,7 +683,7 @@ export default function BudgetsPage() {
                             className={
                               isOverBudget
                                 ? "bg-destructive/10 text-destructive"
-                                : remaining < budget.budget * 0.2
+                                : remaining < effective * 0.2
                                 ? "bg-warning/10 text-warning"
                                 : "bg-success/10 text-success"
                             }
@@ -529,12 +691,12 @@ export default function BudgetsPage() {
                             {isOverBudget ? (
                               <>
                                 <TrendingUp className="mr-1 h-3 w-3" />
-                                Over by ${Math.abs(remaining).toFixed(0)}
+                                Over by {format(Math.abs(remaining))}
                               </>
                             ) : (
                               <>
                                 <TrendingDown className="mr-1 h-3 w-3" />
-                                ${remaining.toFixed(0)} left
+                                {format(remaining)} left
                               </>
                             )}
                           </Badge>
@@ -555,6 +717,7 @@ export default function BudgetsPage() {
         onClose={() => setIsAddDialogOpen(false)}
         onCreated={handleCreated}
         categories={categories}
+        onCategoryCreated={(c) => setCategories((prev) => [...prev, c])}
       />
 
       <EditBudgetDialog
@@ -563,6 +726,12 @@ export default function BudgetsPage() {
         onClose={() => setEditBudget(null)}
         onUpdated={handleUpdated}
         categories={categories}
+      />
+
+      <BudgetDrillSheet
+        budget={drillBudget}
+        open={!!drillBudget}
+        onClose={() => setDrillBudget(null)}
       />
     </div>
   )

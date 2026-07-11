@@ -1,12 +1,19 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useRouter, useSearchParams, usePathname } from "next/navigation"
+import { useCurrency } from "@/lib/currency"
 import {
   fetchTransactions,
   fetchAccounts,
   fetchCategories,
   fetchHouseholdId,
   createTransaction,
+  createTransfer,
+  uploadReceipt,
+  deleteReceipt,
+  API_BASE_URL,
+  createCategory,
   updateTransaction,
   deleteTransaction,
   type Account,
@@ -17,20 +24,12 @@ import {
   ArrowUpRight,
   ArrowDownLeft,
   Search,
-  Filter,
-  Download,
   Plus,
   MoreHorizontal,
   ArrowUpDown,
-  X,
-  Tag,
-  Building2,
   Calendar,
-  Receipt,
-  SplitSquareHorizontal,
   CheckCircle2,
   Clock,
-  ChevronDown,
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -95,6 +94,8 @@ interface Transaction {
   householdId: string
   status: TransactionStatus
   notes?: string
+  transferGroupId: string | null
+  receiptUrl: string | null
 }
 
 function apiToUi(t: ApiTransaction): Transaction {
@@ -104,7 +105,8 @@ function apiToUi(t: ApiTransaction): Transaction {
     description: t.description ?? "",
     category: t.category?.name ?? "Uncategorized",
     categoryId: t.category_id,
-    amount: t.type === "income" ? t.amount : -Math.abs(t.amount),
+    // transfer rows are already signed correctly (negative=outflow, positive=inflow)
+    amount: t.type === "income" ? t.amount : t.type === "transfer" ? t.amount : -Math.abs(t.amount),
     type: t.type as TransactionType,
     date: t.occurred_at,
     merchant: t.merchant ?? t.account?.name ?? "—",
@@ -113,6 +115,8 @@ function apiToUi(t: ApiTransaction): Transaction {
     householdId: t.household_id,
     status: (t.status === "cleared" ? "posted" : t.status ?? "posted") as TransactionStatus,
     notes: t.description ?? undefined,
+    transferGroupId: t.transfer_group_id,
+    receiptUrl: t.receipt_url,
   }
 }
 
@@ -128,9 +132,10 @@ function TransactionDetailSheet({
   open: boolean
   onClose: () => void
   onSaved: (updated: Transaction) => void
-  onDeleted: (id: string) => void
+  onDeleted: (ids: string[]) => void
   categories: Category[]
 }) {
+  const { format } = useCurrency()
   const [title, setTitle] = useState("")
   const [merchant, setMerchant] = useState("")
   const [categoryId, setCategoryId] = useState("")
@@ -138,6 +143,8 @@ function TransactionDetailSheet({
   const [notes, setNotes] = useState("")
   const [saving, setSaving] = useState(false)
   const [deleting, setDeleting] = useState(false)
+  const [uploadingReceipt, setUploadingReceipt] = useState(false)
+  const [receiptUrl, setReceiptUrl] = useState<string | null>(null)
 
   useEffect(() => {
     if (transaction) {
@@ -146,10 +153,39 @@ function TransactionDetailSheet({
       setCategoryId(transaction.categoryId ?? "none")
       setStatus(transaction.status)
       setNotes(transaction.notes ?? "")
+      setReceiptUrl(transaction.receiptUrl)
     }
   }, [transaction])
 
   if (!transaction) return null
+
+  const handleUploadReceipt = async (file: File) => {
+    setUploadingReceipt(true)
+    try {
+      const updated = await uploadReceipt(transaction.id, file)
+      setReceiptUrl(updated.receipt_url)
+      onSaved(apiToUi(updated))
+    } catch (err) {
+      console.error(err)
+      alert("Failed to upload receipt")
+    } finally {
+      setUploadingReceipt(false)
+    }
+  }
+
+  const handleRemoveReceipt = async () => {
+    if (!confirm("Remove this receipt?")) return
+    setUploadingReceipt(true)
+    try {
+      const updated = await deleteReceipt(transaction.id)
+      setReceiptUrl(null)
+      onSaved(apiToUi(updated))
+    } catch (err) {
+      console.error(err)
+    } finally {
+      setUploadingReceipt(false)
+    }
+  }
 
   const handleSave = async () => {
     setSaving(true)
@@ -171,11 +207,14 @@ function TransactionDetailSheet({
   }
 
   const handleDelete = async () => {
-    if (!confirm("Delete this transaction?")) return
+    const msg = transaction.transferGroupId
+      ? "Delete this transfer? Both sides (the debit and the credit) will be removed."
+      : "Delete this transaction?"
+    if (!confirm(msg)) return
     setDeleting(true)
     try {
-      await deleteTransaction(transaction.id)
-      onDeleted(transaction.id)
+      const result = await deleteTransaction(transaction.id)
+      onDeleted(result.deleted_ids)
       onClose()
     } catch (err) {
       console.error(err)
@@ -225,8 +264,7 @@ function TransactionDetailSheet({
                   : "text-foreground"
               }`}
             >
-              {transaction.amount > 0 ? "+" : ""}$
-              {Math.abs(transaction.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              {format(transaction.amount, { signDisplay: "exceptZero" })}
             </p>
             <div className="mt-2 flex items-center justify-center gap-2">
               <Badge
@@ -249,53 +287,59 @@ function TransactionDetailSheet({
 
           <Separator />
 
-          {/* Edit fields */}
-          <div className="space-y-4">
-            <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Edit Details</h3>
-            <div className="space-y-2">
-              <Label>Title</Label>
-              <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+          {/* Edit fields — transfers are immutable (delete + recreate instead) */}
+          {transaction.transferGroupId ? (
+            <p className="text-sm text-muted-foreground">
+              This is a transfer between two accounts. Transfers can&apos;t be edited — delete it and create a new one if you need to change it.
+            </p>
+          ) : (
+            <div className="space-y-4">
+              <h3 className="text-sm font-semibold text-foreground uppercase tracking-wider">Edit Details</h3>
+              <div className="space-y-2">
+                <Label>Title</Label>
+                <Input value={title} onChange={(e) => setTitle(e.target.value)} />
+              </div>
+              <div className="space-y-2">
+                <Label>Merchant</Label>
+                <Input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Merchant name" />
+              </div>
+              <div className="space-y-2">
+                <Label>Category</Label>
+                <Select value={categoryId} onValueChange={setCategoryId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select category" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="none">Uncategorized</SelectItem>
+                    {categories.map((c) => (
+                      <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Status</Label>
+                <Select value={status} onValueChange={setStatus}>
+                  <SelectTrigger>
+                    <SelectValue />
+                  </SelectTrigger>
+                  <SelectContent>
+                    <SelectItem value="posted">Posted</SelectItem>
+                    <SelectItem value="pending">Pending</SelectItem>
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>Notes</Label>
+                <Textarea
+                  placeholder="Add a note..."
+                  value={notes}
+                  onChange={(e) => setNotes(e.target.value)}
+                  className="min-h-[80px] resize-none text-sm"
+                />
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Merchant</Label>
-              <Input value={merchant} onChange={(e) => setMerchant(e.target.value)} placeholder="Merchant name" />
-            </div>
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select category" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Uncategorized</SelectItem>
-                  {categories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Status</Label>
-              <Select value={status} onValueChange={setStatus}>
-                <SelectTrigger>
-                  <SelectValue />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="posted">Posted</SelectItem>
-                  <SelectItem value="pending">Pending</SelectItem>
-                </SelectContent>
-              </Select>
-            </div>
-            <div className="space-y-2">
-              <Label>Notes</Label>
-              <Textarea
-                placeholder="Add a note..."
-                value={notes}
-                onChange={(e) => setNotes(e.target.value)}
-                className="min-h-[80px] resize-none text-sm"
-              />
-            </div>
-          </div>
+          )}
 
           <Separator />
 
@@ -315,13 +359,74 @@ function TransactionDetailSheet({
             </div>
           </div>
 
+          {!transaction.transferGroupId && (
+            <>
+              <Separator />
+              <div className="space-y-2">
+                <Label>Receipt</Label>
+                {receiptUrl ? (
+                  <div className="flex items-center gap-3 rounded-lg border border-border/50 bg-muted/30 p-3">
+                    {receiptUrl.endsWith(".pdf") ? (
+                      <a
+                        href={`${API_BASE_URL}${receiptUrl}`}
+                        target="_blank"
+                        rel="noopener noreferrer"
+                        className="text-sm text-primary underline"
+                      >
+                        View receipt (PDF)
+                      </a>
+                    ) : (
+                      <img
+                        src={`${API_BASE_URL}${receiptUrl}`}
+                        alt="Receipt"
+                        className="h-16 w-16 rounded object-cover"
+                      />
+                    )}
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      className="ml-auto text-destructive hover:text-destructive"
+                      onClick={handleRemoveReceipt}
+                      disabled={uploadingReceipt}
+                    >
+                      Remove
+                    </Button>
+                  </div>
+                ) : (
+                  <div>
+                    <input
+                      type="file"
+                      accept="image/*,application/pdf"
+                      id="receipt-upload"
+                      className="hidden"
+                      onChange={(e) => {
+                        const file = e.target.files?.[0]
+                        if (file) handleUploadReceipt(file)
+                      }}
+                    />
+                    <Button
+                      variant="outline"
+                      size="sm"
+                      disabled={uploadingReceipt}
+                      onClick={() => document.getElementById("receipt-upload")?.click()}
+                    >
+                      {uploadingReceipt ? "Uploading..." : "Attach Receipt"}
+                    </Button>
+                  </div>
+                )}
+              </div>
+            </>
+          )}
+
           <div className="flex gap-2 pt-2">
-            <Button className="flex-1" onClick={handleSave} disabled={saving}>
-              {saving ? "Saving..." : "Save Changes"}
-            </Button>
+            {!transaction.transferGroupId && (
+              <Button className="flex-1" onClick={handleSave} disabled={saving}>
+                {saving ? "Saving..." : "Save Changes"}
+              </Button>
+            )}
             <Button
               variant="outline"
-              className="text-destructive hover:text-destructive"
+              className={transaction.transferGroupId ? "flex-1 text-destructive hover:text-destructive" : "text-destructive hover:text-destructive"}
               onClick={handleDelete}
               disabled={deleting}
             >
@@ -340,12 +445,16 @@ function AddTransactionDialog({
   onCreated,
   accounts,
   categories,
+  onCategoryCreated,
+  defaultType,
 }: {
   open: boolean
   onClose: () => void
   onCreated: (txn: Transaction) => void
   accounts: Account[]
   categories: Category[]
+  onCategoryCreated: (category: Category) => void
+  defaultType?: "income" | "expense" | "transfer"
 }) {
   const [type, setType] = useState<"income" | "expense" | "transfer">("expense")
   const [amount, setAmount] = useState("")
@@ -353,39 +462,68 @@ function AddTransactionDialog({
   const [merchant, setMerchant] = useState("")
   const [categoryId, setCategoryId] = useState("none")
   const [accountId, setAccountId] = useState("")
+  const [toAccountId, setToAccountId] = useState("")
+
+  // Apply the requested default type whenever the dialog is opened (e.g. via
+  // the command palette's "Transfer Money" quick action).
+  useEffect(() => {
+    if (open && defaultType) setType(defaultType)
+  }, [open, defaultType])
   const [date, setDate] = useState(new Date().toISOString().split("T")[0])
   const [description, setDescription] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [addingCategory, setAddingCategory] = useState(false)
+  const [newCategoryName, setNewCategoryName] = useState("")
 
-  // Set default account when accounts load
+  // Re-initialize account selection every time the dialog opens
   useEffect(() => {
-    if (accounts.length > 0 && !accountId) setAccountId(accounts[0].id)
-  }, [accounts])
+    if (!open) return
+    if (accounts.length > 0) {
+      setAccountId(accounts[0].id)
+      if (accounts.length > 1)
+        setToAccountId(accounts.find((a) => a.id !== accounts[0].id)?.id ?? "")
+    }
+  }, [open, accounts])
 
   const handleSubmit = async () => {
-    if (!title.trim()) { setError("Title is required"); return }
+    if (type !== "transfer" && !title.trim()) { setError("Title is required"); return }
     if (!amount || isNaN(parseFloat(amount)) || parseFloat(amount) <= 0) { setError("Enter a valid amount > 0"); return }
-    if (!accountId) { setError("Select an account"); return }
+    if (!accountId) { setError(type === "transfer" ? "Select a from account" : "Select an account"); return }
 
     setSaving(true)
     setError("")
     try {
       const householdId = await fetchHouseholdId()
-      const created = await createTransaction({
-        household_id: householdId,
-        account_id: accountId,
-        title: title.trim(),
-        amount: parseFloat(amount),
-        type,
-        occurred_at: new Date(date).toISOString(),
-        merchant: merchant.trim() || undefined,
-        description: description.trim() || undefined,
-        category_id: categoryId !== "none" ? categoryId : undefined,
-        status: "cleared",
-        currency: "USD",
-      })
-      onCreated(apiToUi(created))
+      if (type === "transfer") {
+        if (!toAccountId) { setError("Select a to account"); setSaving(false); return }
+        if (toAccountId === accountId) { setError("From and To accounts must differ"); setSaving(false); return }
+        const result = await createTransfer({
+          household_id: householdId,
+          from_account_id: accountId,
+          to_account_id: toAccountId,
+          title: title.trim() || undefined,
+          amount: parseFloat(amount),
+          occurred_at: new Date(date).toISOString(),
+          status: "cleared",
+        })
+        onCreated(apiToUi(result.from_transaction))
+        onCreated(apiToUi(result.to_transaction))
+      } else {
+        const created = await createTransaction({
+          household_id: householdId,
+          account_id: accountId,
+          title: title.trim(),
+          amount: parseFloat(amount),
+          type,
+          occurred_at: new Date(date).toISOString(),
+          merchant: merchant.trim() || undefined,
+          description: description.trim() || undefined,
+          category_id: categoryId !== "none" ? categoryId : undefined,
+          status: "cleared",
+        })
+        onCreated(apiToUi(created))
+      }
       // Reset
       setType("expense")
       setAmount("")
@@ -394,11 +532,32 @@ function AddTransactionDialog({
       setCategoryId("none")
       setDate(new Date().toISOString().split("T")[0])
       setDescription("")
+      setAccountId(accounts[0]?.id ?? "")
+      setToAccountId(accounts.length > 1 ? (accounts.find((a) => a.id !== accounts[0].id)?.id ?? "") : "")
+      setError("")
       onClose()
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : "Failed to create transaction")
     } finally {
       setSaving(false)
+    }
+  }
+
+  const handleCreateCategory = async () => {
+    if (!newCategoryName.trim()) return
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createCategory({
+        household_id: householdId,
+        name: newCategoryName.trim(),
+        is_income: type === "income",
+      })
+      onCategoryCreated(created)
+      setCategoryId(created.id)
+      setNewCategoryName("")
+      setAddingCategory(false)
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create category")
     }
   }
 
@@ -443,44 +602,98 @@ function AddTransactionDialog({
           </div>
 
           <div className="space-y-2">
-            <Label>Title</Label>
-            <Input placeholder="Transaction title" value={title} onChange={(e) => setTitle(e.target.value)} />
+            <Label>Title{type === "transfer" && " (optional)"}</Label>
+            <Input
+              placeholder={type === "transfer" ? "e.g. Move to savings" : "Transaction title"}
+              value={title}
+              onChange={(e) => setTitle(e.target.value)}
+            />
           </div>
 
-          <div className="space-y-2">
-            <Label>Merchant</Label>
-            <Input placeholder="Merchant or payee name" value={merchant} onChange={(e) => setMerchant(e.target.value)} />
-          </div>
+          {type !== "transfer" && (
+            <div className="space-y-2">
+              <Label>Merchant</Label>
+              <Input placeholder="Merchant or payee name" value={merchant} onChange={(e) => setMerchant(e.target.value)} />
+            </div>
+          )}
 
-          <div className="grid grid-cols-2 gap-4">
-            <div className="space-y-2">
-              <Label>Category</Label>
-              <Select value={categoryId} onValueChange={setCategoryId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  <SelectItem value="none">Uncategorized</SelectItem>
-                  {filteredCategories.map((c) => (
-                    <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          {type === "transfer" ? (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>From Account</Label>
+                <Select value={accountId} onValueChange={setAccountId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
+              <div className="space-y-2">
+                <Label>To Account</Label>
+                <Select value={toAccountId} onValueChange={setToAccountId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.filter((a) => a.id !== accountId).map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-            <div className="space-y-2">
-              <Label>Account</Label>
-              <Select value={accountId} onValueChange={setAccountId}>
-                <SelectTrigger>
-                  <SelectValue placeholder="Select" />
-                </SelectTrigger>
-                <SelectContent>
-                  {accounts.map((a) => (
-                    <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
-                  ))}
-                </SelectContent>
-              </Select>
+          ) : (
+            <div className="grid grid-cols-2 gap-4">
+              <div className="space-y-2">
+                <Label>Category</Label>
+                {addingCategory ? (
+                  <div className="flex items-center gap-2">
+                    <Input
+                      placeholder="New category name"
+                      value={newCategoryName}
+                      onChange={(e) => setNewCategoryName(e.target.value)}
+                      autoFocus
+                    />
+                    <Button type="button" size="sm" onClick={handleCreateCategory}>Add</Button>
+                    <Button type="button" size="sm" variant="outline" onClick={() => setAddingCategory(false)}>Cancel</Button>
+                  </div>
+                ) : (
+                  <Select
+                    value={categoryId}
+                    onValueChange={(v) => { if (v === "__add_new__") setAddingCategory(true); else setCategoryId(v) }}
+                  >
+                    <SelectTrigger>
+                      <SelectValue placeholder="Select" />
+                    </SelectTrigger>
+                    <SelectContent>
+                      <SelectItem value="none">Uncategorized</SelectItem>
+                      {filteredCategories.map((c) => (
+                        <SelectItem key={c.id} value={c.id}>{c.name}</SelectItem>
+                      ))}
+                      <SelectItem value="__add_new__" className="text-primary">+ Add new category…</SelectItem>
+                    </SelectContent>
+                  </Select>
+                )}
+              </div>
+              <div className="space-y-2">
+                <Label>Account</Label>
+                <Select value={accountId} onValueChange={setAccountId}>
+                  <SelectTrigger>
+                    <SelectValue placeholder="Select" />
+                  </SelectTrigger>
+                  <SelectContent>
+                    {accounts.map((a) => (
+                      <SelectItem key={a.id} value={a.id}>{a.name}</SelectItem>
+                    ))}
+                  </SelectContent>
+                </Select>
+              </div>
             </div>
-          </div>
+          )}
 
           <div className="grid grid-cols-2 gap-4">
             <div className="space-y-2">
@@ -505,6 +718,7 @@ function AddTransactionDialog({
 }
 
 export default function TransactionsPage() {
+  const { format } = useCurrency()
   const [transactions, setTransactions] = useState<Transaction[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -512,10 +726,26 @@ export default function TransactionsPage() {
   const [categoryFilter, setCategoryFilter] = useState("all")
   const [typeFilter, setTypeFilter] = useState("all")
   const [statusFilter, setStatusFilter] = useState("all")
+  const [currentPage, setCurrentPage] = useState(1)
+  const PAGE_SIZE = 25
   const [selectedTransaction, setSelectedTransaction] = useState<Transaction | null>(null)
   const [isDetailOpen, setIsDetailOpen] = useState(false)
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [addDefaultType, setAddDefaultType] = useState<"income" | "expense" | "transfer" | undefined>(undefined)
   const [loading, setLoading] = useState(true)
+
+  const router = useRouter()
+  const pathname = usePathname()
+  const searchParams = useSearchParams()
+
+  useEffect(() => {
+    if (searchParams.get("action") === "add") {
+      const type = searchParams.get("type")
+      setAddDefaultType(type === "income" || type === "expense" || type === "transfer" ? type : undefined)
+      setIsAddOpen(true)
+      router.replace(pathname, { scroll: false })
+    }
+  }, [searchParams, pathname, router])
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -547,6 +777,9 @@ export default function TransactionsPage() {
     return matchesSearch && matchesCategory && matchesType && matchesStatus
   })
 
+  const totalPages = Math.max(1, Math.ceil(filteredTransactions.length / PAGE_SIZE))
+  const pagedTransactions = filteredTransactions.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE)
+
   const totalIncome = transactions.filter((t) => t.type === "income").reduce((acc, t) => acc + t.amount, 0)
   const totalExpenses = transactions.filter((t) => t.type === "expense").reduce((acc, t) => acc + Math.abs(t.amount), 0)
 
@@ -559,8 +792,8 @@ export default function TransactionsPage() {
     setTransactions((prev) => prev.map((t) => t.id === updated.id ? updated : t))
   }
 
-  const handleDeleted = (id: string) => {
-    setTransactions((prev) => prev.filter((t) => t.id !== id))
+  const handleDeleted = (ids: string[]) => {
+    setTransactions((prev) => prev.filter((t) => !ids.includes(t.id)))
   }
 
   const handleCreated = (txn: Transaction) => {
@@ -591,7 +824,7 @@ export default function TransactionsPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Total Income</p>
                 <p className="text-2xl font-bold text-success">
-                  +${totalIncome.toLocaleString()}
+                  {format(totalIncome, { signDisplay: "always" })}
                 </p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
@@ -606,7 +839,7 @@ export default function TransactionsPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Total Expenses</p>
                 <p className="text-2xl font-bold text-destructive">
-                  -${totalExpenses.toLocaleString()}
+                  {format(-totalExpenses, { signDisplay: "always" })}
                 </p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
@@ -621,7 +854,7 @@ export default function TransactionsPage() {
               <div>
                 <p className="text-sm text-muted-foreground">Net Cashflow</p>
                 <p className="text-2xl font-bold text-foreground">
-                  ${(totalIncome - totalExpenses).toLocaleString()}
+                  {format(totalIncome - totalExpenses)}
                 </p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
@@ -637,7 +870,10 @@ export default function TransactionsPage() {
           <div className="flex flex-col gap-4 md:flex-row md:items-center md:justify-between">
             <div>
               <CardTitle className="text-base font-semibold">All Transactions</CardTitle>
-              <CardDescription>{filteredTransactions.length} transactions found</CardDescription>
+              <CardDescription>
+                {filteredTransactions.length} transaction{filteredTransactions.length !== 1 ? "s" : ""} found
+                {totalPages > 1 && ` · page ${currentPage} of ${totalPages}`}
+              </CardDescription>
             </div>
             <div className="flex flex-wrap items-center gap-2">
               <div className="relative">
@@ -646,10 +882,10 @@ export default function TransactionsPage() {
                   placeholder="Search transactions..."
                   className="w-[220px] pl-9"
                   value={searchQuery}
-                  onChange={(e) => setSearchQuery(e.target.value)}
+                  onChange={(e) => { setSearchQuery(e.target.value); setCurrentPage(1) }}
                 />
               </div>
-              <Select value={categoryFilter} onValueChange={setCategoryFilter}>
+              <Select value={categoryFilter} onValueChange={(v) => { setCategoryFilter(v); setCurrentPage(1) }}>
                 <SelectTrigger className="w-[160px]">
                   <SelectValue placeholder="Category" />
                 </SelectTrigger>
@@ -660,7 +896,7 @@ export default function TransactionsPage() {
                   ))}
                 </SelectContent>
               </Select>
-              <Select value={typeFilter} onValueChange={setTypeFilter}>
+              <Select value={typeFilter} onValueChange={(v) => { setTypeFilter(v); setCurrentPage(1) }}>
                 <SelectTrigger className="w-[120px]">
                   <SelectValue placeholder="Type" />
                 </SelectTrigger>
@@ -671,7 +907,7 @@ export default function TransactionsPage() {
                   <SelectItem value="transfer">Transfer</SelectItem>
                 </SelectContent>
               </Select>
-              <Select value={statusFilter} onValueChange={setStatusFilter}>
+              <Select value={statusFilter} onValueChange={(v) => { setStatusFilter(v); setCurrentPage(1) }}>
                 <SelectTrigger className="w-[120px]">
                   <SelectValue placeholder="Status" />
                 </SelectTrigger>
@@ -703,7 +939,7 @@ export default function TransactionsPage() {
                 </TableRow>
               </TableHeader>
               <TableBody>
-                {filteredTransactions.map((transaction) => (
+                {pagedTransactions.map((transaction) => (
                   <TableRow
                     key={transaction.id}
                     className="cursor-pointer"
@@ -769,8 +1005,7 @@ export default function TransactionsPage() {
                             : "text-foreground"
                         }`}
                       >
-                        {transaction.amount > 0 ? "+" : ""}$
-                        {Math.abs(transaction.amount).toLocaleString()}
+                        {format(transaction.amount, { signDisplay: "exceptZero" })}
                       </span>
                     </TableCell>
                     <TableCell>
@@ -794,10 +1029,13 @@ export default function TransactionsPage() {
                             className="text-destructive"
                             onClick={async (e) => {
                               e.stopPropagation()
-                              if (!confirm("Delete this transaction?")) return
+                              const msg = transaction.transferGroupId
+                                ? "Delete this transfer? Both sides (the debit and the credit) will be removed."
+                                : "Delete this transaction?"
+                              if (!confirm(msg)) return
                               try {
-                                await deleteTransaction(transaction.id)
-                                handleDeleted(transaction.id)
+                                const result = await deleteTransaction(transaction.id)
+                                handleDeleted(result.deleted_ids)
                               } catch (err) { console.error(err) }
                             }}
                           >
@@ -810,6 +1048,35 @@ export default function TransactionsPage() {
                 ))}
               </TableBody>
             </Table>
+          )}
+
+          {totalPages > 1 && (
+            <div className="flex items-center justify-between pt-4 border-t border-border/50">
+              <p className="text-sm text-muted-foreground">
+                Showing {(currentPage - 1) * PAGE_SIZE + 1}–{Math.min(currentPage * PAGE_SIZE, filteredTransactions.length)} of {filteredTransactions.length}
+              </p>
+              <div className="flex items-center gap-2">
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.max(1, p - 1))}
+                  disabled={currentPage === 1}
+                >
+                  Previous
+                </Button>
+                <span className="text-sm text-muted-foreground px-2">
+                  Page {currentPage} of {totalPages}
+                </span>
+                <Button
+                  variant="outline"
+                  size="sm"
+                  onClick={() => setCurrentPage((p) => Math.min(totalPages, p + 1))}
+                  disabled={currentPage === totalPages}
+                >
+                  Next
+                </Button>
+              </div>
+            </div>
           )}
         </CardContent>
       </Card>
@@ -829,6 +1096,8 @@ export default function TransactionsPage() {
         onCreated={handleCreated}
         accounts={accounts}
         categories={categories}
+        onCategoryCreated={(c) => setCategories((prev) => [...prev, c])}
+        defaultType={addDefaultType}
       />
     </div>
   )

@@ -2,10 +2,14 @@
 
 import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useCurrency } from "@/lib/currency"
 import {
   fetchAccounts,
   fetchTransactions,
   updateAccountBalance,
+  createAccount,
+  deleteAccount,
+  fetchHouseholdId,
   type Account,
   type Transaction,
 } from "@/lib/api"
@@ -61,14 +65,20 @@ function accountColor(type: string) {
 }
 
 export default function CashAccountsPage() {
+  const { format } = useCurrency()
   const [cashAccounts, setCashAccounts] = useState<Account[]>([])
   const [txnsByAccount, setTxnsByAccount] = useState<Record<string, Transaction[]>>({})
   const [loading, setLoading] = useState(true)
   const [isUpdateOpen, setIsUpdateOpen] = useState(false)
+  const [isAddOpen, setIsAddOpen] = useState(false)
   const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
   const [newBalance, setNewBalance] = useState("")
   const [saving, setSaving] = useState(false)
   const [error, setError] = useState("")
+  const [newName, setNewName] = useState("")
+  const [newAccountBalance, setNewAccountBalance] = useState("")
+  const [addSaving, setAddSaving] = useState(false)
+  const [addError, setAddError] = useState("")
 
   const loadData = useCallback(() => {
     setLoading(true)
@@ -94,7 +104,7 @@ export default function CashAccountsPage() {
 
   const handleOpenUpdate = (account: Account) => {
     setSelectedAccount(account)
-    setNewBalance(String(account.balance))
+    setNewBalance(String(account.current_balance))
     setError("")
     setIsUpdateOpen(true)
   }
@@ -116,7 +126,40 @@ export default function CashAccountsPage() {
     }
   }
 
-  const totalCash = cashAccounts.reduce((acc, a) => acc + a.balance, 0)
+  const totalCash = cashAccounts.reduce((acc, a) => acc + a.current_balance, 0)
+
+  const handleAddAccount = async () => {
+    if (!newName.trim()) { setAddError("Name is required"); return }
+    setAddSaving(true)
+    setAddError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createAccount({
+        household_id: householdId,
+        name: newName.trim(),
+        type: "cash",
+        opening_balance: newAccountBalance ? parseFloat(newAccountBalance) : 0,
+      })
+      setCashAccounts((prev) => [...prev, created])
+      setNewName("")
+      setNewAccountBalance("")
+      setIsAddOpen(false)
+    } catch (err: unknown) {
+      setAddError(err instanceof Error ? err.message : "Failed to create account")
+    } finally {
+      setAddSaving(false)
+    }
+  }
+
+  const handleRemove = async (account: Account) => {
+    if (!confirm(`Remove "${account.name}"?`)) return
+    try {
+      await deleteAccount(account.id)
+      setCashAccounts((prev) => prev.filter((a) => a.id !== account.id))
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to remove account")
+    }
+  }
 
   if (loading) {
     return (
@@ -143,12 +186,36 @@ export default function CashAccountsPage() {
         <Card>
           <CardContent className="py-12 text-center">
             <Banknote className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No cash accounts in your data.</p>
-            <p className="text-xs text-muted-foreground mt-1">
-              Accounts with type "cash", "wallet", or "safe" will appear here.
-            </p>
+            <p className="text-muted-foreground">No cash accounts yet.</p>
+            <Button size="sm" className="mt-4" onClick={() => setIsAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Cash Account
+            </Button>
           </CardContent>
         </Card>
+        <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+          <DialogContent>
+            <DialogHeader>
+              <DialogTitle>Add Cash Account</DialogTitle>
+              <DialogDescription>Track a new physical cash account or wallet</DialogDescription>
+            </DialogHeader>
+            <div className="space-y-4 py-4">
+              {addError && <p className="text-sm text-destructive">{addError}</p>}
+              <div className="space-y-2">
+                <Label>Account Name</Label>
+                <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Wallet" />
+              </div>
+              <div className="space-y-2">
+                <Label>Starting Balance</Label>
+                <Input type="number" step="0.01" value={newAccountBalance} onChange={(e) => setNewAccountBalance(e.target.value)} placeholder="0.00" />
+              </div>
+            </div>
+            <DialogFooter>
+              <Button variant="outline" onClick={() => setIsAddOpen(false)} disabled={addSaving}>Cancel</Button>
+              <Button onClick={handleAddAccount} disabled={addSaving}>{addSaving ? "Adding..." : "Add Account"}</Button>
+            </DialogFooter>
+          </DialogContent>
+        </Dialog>
       </div>
     )
   }
@@ -165,11 +232,11 @@ export default function CashAccountsPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Cash Accounts</h1>
             <p className="text-sm text-muted-foreground">
-              {cashAccounts.length} account{cashAccounts.length !== 1 ? "s" : ""} · ${totalCash.toLocaleString()} total
+              {cashAccounts.length} account{cashAccounts.length !== 1 ? "s" : ""} · {format(totalCash)} total
             </p>
           </div>
         </div>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" onClick={() => setIsAddOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Cash Account
         </Button>
@@ -179,7 +246,7 @@ export default function CashAccountsPage() {
         <Card>
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total Cash</p>
-            <p className="text-3xl font-bold text-foreground">${totalCash.toLocaleString()}</p>
+            <p className="text-3xl font-bold text-foreground">{format(totalCash)}</p>
             <p className="text-xs text-muted-foreground mt-1">
               Across {cashAccounts.length} account{cashAccounts.length !== 1 ? "s" : ""}
             </p>
@@ -241,6 +308,11 @@ export default function CashAccountsPage() {
                       <DropdownMenuItem>
                         <Link href="/transactions">View History</Link>
                       </DropdownMenuItem>
+                      <DropdownMenuSeparator />
+                      <DropdownMenuItem className="text-destructive" onClick={() => handleRemove(account)}>
+                        <Trash2 className="mr-2 h-4 w-4" />
+                        Remove
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
@@ -248,7 +320,7 @@ export default function CashAccountsPage() {
               <CardContent className="space-y-4">
                 <div>
                   <p className="text-3xl font-bold text-foreground">
-                    ${account.balance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {format(account.current_balance)}
                   </p>
                   {account.last_synced_at && (
                     <p className="text-sm text-muted-foreground mt-1">
@@ -304,7 +376,7 @@ export default function CashAccountsPage() {
                               txn.type === "income" ? "text-success" : "text-foreground"
                             }`}
                           >
-                            {txn.type === "income" ? "+" : "-"}${txn.amount.toFixed(2)}
+                            {format(txn.type === "income" ? txn.amount : -txn.amount, { signDisplay: "exceptZero" })}
                           </span>
                         </div>
                       ))}
@@ -328,7 +400,7 @@ export default function CashAccountsPage() {
             <div className="space-y-2">
               <Label>Current Balance</Label>
               <p className="text-2xl font-bold text-foreground">
-                ${selectedAccount?.balance.toLocaleString() ?? "0"}
+                {format(selectedAccount?.current_balance ?? 0)}
               </p>
             </div>
             <div className="space-y-2">
@@ -351,6 +423,30 @@ export default function CashAccountsPage() {
             <Button onClick={handleUpdateBalance} disabled={saving}>
               {saving ? "Updating..." : "Update Balance"}
             </Button>
+          </DialogFooter>
+        </DialogContent>
+      </Dialog>
+
+      <Dialog open={isAddOpen} onOpenChange={setIsAddOpen}>
+        <DialogContent>
+          <DialogHeader>
+            <DialogTitle>Add Cash Account</DialogTitle>
+            <DialogDescription>Track a new physical cash account or wallet</DialogDescription>
+          </DialogHeader>
+          <div className="space-y-4 py-4">
+            {addError && <p className="text-sm text-destructive">{addError}</p>}
+            <div className="space-y-2">
+              <Label>Account Name</Label>
+              <Input value={newName} onChange={(e) => setNewName(e.target.value)} placeholder="e.g. Wallet" />
+            </div>
+            <div className="space-y-2">
+              <Label>Starting Balance</Label>
+              <Input type="number" step="0.01" value={newAccountBalance} onChange={(e) => setNewAccountBalance(e.target.value)} placeholder="0.00" />
+            </div>
+          </div>
+          <DialogFooter>
+            <Button variant="outline" onClick={() => setIsAddOpen(false)} disabled={addSaving}>Cancel</Button>
+            <Button onClick={handleAddAccount} disabled={addSaving}>{addSaving ? "Adding..." : "Add Account"}</Button>
           </DialogFooter>
         </DialogContent>
       </Dialog>

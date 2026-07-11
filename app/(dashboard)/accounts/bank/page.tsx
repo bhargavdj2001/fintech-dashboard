@@ -1,99 +1,182 @@
 "use client"
 
-import { useEffect, useState } from "react"
+import { useCallback, useEffect, useState } from "react"
 import Link from "next/link"
+import { useCurrency } from "@/lib/currency"
 import {
   Building2,
   PiggyBank,
-  TrendingUp,
-  TrendingDown,
   MoreHorizontal,
   Plus,
-  ArrowRightLeft,
-  RefreshCw,
   ChevronLeft,
   ArrowDownLeft,
   ArrowUpRight,
+  ArrowRightLeft,
 } from "lucide-react"
-import { fetchAccounts, type Account as ApiAccount } from "@/lib/api"
-import { Card, CardContent, CardDescription, CardHeader, CardTitle, CardFooter, CardAction } from "@/components/ui/card"
+import {
+  fetchAccounts,
+  fetchTransactions,
+  createAccount,
+  deleteAccount,
+  fetchHouseholdId,
+  type Account,
+  type Transaction,
+} from "@/lib/api"
+import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Tabs, TabsContent, TabsList, TabsTrigger } from "@/components/ui/tabs"
 import {
   DropdownMenu,
   DropdownMenuContent,
   DropdownMenuItem,
-  DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
-import { Area, AreaChart, XAxis, YAxis } from "recharts"
-import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
+import {
+  Select,
+  SelectContent,
+  SelectItem,
+  SelectTrigger,
+  SelectValue,
+} from "@/components/ui/select"
 
 const COLORS = [
-  { color: "text-chart-1", bgColor: "bg-chart-1" },
-  { color: "text-chart-2", bgColor: "bg-chart-2" },
-  { color: "text-chart-3", bgColor: "bg-chart-3" },
-  { color: "text-chart-4", bgColor: "bg-chart-4" },
-  { color: "text-chart-5", bgColor: "bg-chart-5" },
+  { text: "text-chart-1", bg: "bg-chart-1" },
+  { text: "text-chart-2", bg: "bg-chart-2" },
+  { text: "text-chart-3", bg: "bg-chart-3" },
+  { text: "text-chart-4", bg: "bg-chart-4" },
+  { text: "text-chart-5", bg: "bg-chart-5" },
 ]
 
-type BankAccount = {
-  id: string
-  name: string
-  institution: string
-  type: string
-  balance: number
-  lastSync: string
-  accountNumber: string
-  icon: typeof Building2
-  change: number
-  color: string
-  bgColor: string
-  history: { month: string; balance: number }[]
-  recentTransactions: { id: string; title: string; amount: number; date: string; type: string }[]
-}
+function AddBankAccountDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (a: Account) => void
+}) {
+  const [name, setName] = useState("")
+  const [type, setType] = useState<"checking" | "savings">("checking")
+  const [balance, setBalance] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
 
-function apiToBank(a: ApiAccount, idx: number): BankAccount {
-  return {
-    id: a.id,
-    name: a.name,
-    institution: a.external_id ? `ID: ${a.external_id}` : a.type,
-    type: a.type,
-    balance: a.balance,
-    lastSync: a.last_synced_at ? new Date(a.last_synced_at).toLocaleString() : "—",
-    accountNumber: "****",
-    icon: a.type === "savings" ? PiggyBank : Building2,
-    change: 0,
-    color: COLORS[idx % COLORS.length].color,
-    bgColor: COLORS[idx % COLORS.length].bgColor,
-    history: [],
-    recentTransactions: [],
+  const handleSubmit = async () => {
+    if (!name.trim()) { setError("Name is required"); return }
+    setSaving(true)
+    setError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createAccount({
+        household_id: householdId,
+        name: name.trim(),
+        type,
+        opening_balance: balance ? parseFloat(balance) : 0,
+      })
+      onCreated(created)
+      setName("")
+      setBalance("")
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create account")
+    } finally {
+      setSaving(false)
+    }
   }
-}
 
-const chartConfig = {
-  balance: {
-    label: "Balance",
-    color: "var(--chart-1)",
-  },
-} satisfies ChartConfig;
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Bank Account</DialogTitle>
+          <DialogDescription>Manually add a checking or savings account</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="space-y-2">
+            <Label>Type</Label>
+            <Select value={type} onValueChange={(v) => setType(v as "checking" | "savings")}>
+              <SelectTrigger>
+                <SelectValue />
+              </SelectTrigger>
+              <SelectContent>
+                <SelectItem value="checking">Checking</SelectItem>
+                <SelectItem value="savings">Savings</SelectItem>
+              </SelectContent>
+            </Select>
+          </div>
+          <div className="space-y-2">
+            <Label>Account Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Primary Checking" />
+          </div>
+          <div className="space-y-2">
+            <Label>Opening Balance</Label>
+            <Input type="number" step="0.01" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="0.00" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>{saving ? "Adding..." : "Add Account"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
 
 export default function BankAccountsPage() {
-  const [bankAccounts, setBankAccounts] = useState<BankAccount[]>([])
-  const [selectedAccount, setSelectedAccount] = useState<BankAccount | null>(null)
+  const { format } = useCurrency()
+  const [bankAccounts, setBankAccounts] = useState<Account[]>([])
+  const [selectedAccount, setSelectedAccount] = useState<Account | null>(null)
+  const [recentTxns, setRecentTxns] = useState<Transaction[]>([])
+  const [isAddOpen, setIsAddOpen] = useState(false)
 
-  useEffect(() => {
+  const loadAccounts = useCallback(() => {
     fetchAccounts()
       .then((data) => {
-        const mapped = data.map(apiToBank)
-        setBankAccounts(mapped)
-        if (mapped.length > 0) setSelectedAccount(mapped[0])
+        const bank = data.filter((a) => a.type === "checking" || a.type === "savings")
+        setBankAccounts(bank)
+        setSelectedAccount((prev) => prev && bank.some((a) => a.id === prev.id) ? prev : bank[0] ?? null)
       })
       .catch(console.error)
   }, [])
 
-  const totalBalance = bankAccounts.reduce((acc, a) => acc + a.balance, 0)
+  useEffect(() => { loadAccounts() }, [loadAccounts])
+
+  useEffect(() => {
+    if (!selectedAccount) { setRecentTxns([]); return }
+    fetchTransactions({ account_id: selectedAccount.id, limit: 8 })
+      .then((res) => setRecentTxns(res.items))
+      .catch(console.error)
+  }, [selectedAccount])
+
+  const totalBalance = bankAccounts.reduce((acc, a) => acc + a.current_balance, 0)
+
+  const handleCreated = (a: Account) => {
+    setBankAccounts((prev) => [...prev, a])
+    setSelectedAccount(a)
+  }
+
+  const handleRemove = async (account: Account) => {
+    if (!confirm(`Remove "${account.name}"?`)) return
+    try {
+      await deleteAccount(account.id)
+      setBankAccounts((prev) => prev.filter((a) => a.id !== account.id))
+      if (selectedAccount?.id === account.id) setSelectedAccount(null)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to remove account")
+    }
+  }
 
   return (
     <div className="space-y-6">
@@ -107,20 +190,14 @@ export default function BankAccountsPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Bank Accounts</h1>
             <p className="text-sm text-muted-foreground">
-              {bankAccounts.length} accounts · ${totalBalance.toLocaleString()} total
+              {bankAccounts.length} accounts · {format(totalBalance)} total
             </p>
           </div>
         </div>
-        <div className="flex items-center gap-2">
-          <Button variant="outline" size="sm">
-            <RefreshCw className="mr-2 h-4 w-4" />
-            Sync All
-          </Button>
-          <Button size="sm">
-            <Plus className="mr-2 h-4 w-4" />
-            Add Account
-          </Button>
-        </div>
+        <Button size="sm" onClick={() => setIsAddOpen(true)}>
+          <Plus className="mr-2 h-4 w-4" />
+          Add Account
+        </Button>
       </div>
 
       <div className="grid gap-6 lg:grid-cols-3">
@@ -128,192 +205,133 @@ export default function BankAccountsPage() {
           <h2 className="text-sm font-medium text-muted-foreground uppercase tracking-wider">
             All Accounts
           </h2>
-          {bankAccounts.map((account) => (
-            <Card
-              key={account.id}
-              className={`cursor-pointer transition-all hover:bg-muted/30 ${
-                selectedAccount?.id === account.id ? "ring-2 ring-primary" : ""
-              }`}
-              onClick={() => setSelectedAccount(account)}
-            >
-              <CardContent className="pt-6">
-                <div className="flex items-center justify-between">
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${account.bgColor}/10`}>
-                      <account.icon className={`h-5 w-5 ${account.color}`} />
+          {bankAccounts.length === 0 ? (
+            <p className="text-sm text-muted-foreground">No bank accounts yet.</p>
+          ) : (
+            bankAccounts.map((account, idx) => {
+              const Icon = account.type === "savings" ? PiggyBank : Building2
+              const color = COLORS[idx % COLORS.length]
+              return (
+                <Card
+                  key={account.id}
+                  className={`cursor-pointer transition-all hover:bg-muted/30 ${
+                    selectedAccount?.id === account.id ? "ring-2 ring-primary" : ""
+                  }`}
+                  onClick={() => setSelectedAccount(account)}
+                >
+                  <CardContent className="pt-6">
+                    <div className="flex items-center justify-between">
+                      <div className="flex items-center gap-3">
+                        <div className={`flex h-10 w-10 items-center justify-center rounded-lg ${color.bg}/10`}>
+                          <Icon className={`h-5 w-5 ${color.text}`} />
+                        </div>
+                        <div>
+                          <p className="font-medium text-foreground">{account.name}</p>
+                          <p className="text-xs text-muted-foreground capitalize">{account.type}</p>
+                        </div>
+                      </div>
+                      <DropdownMenu>
+                        <DropdownMenuTrigger asChild>
+                          <Button
+                            variant="ghost"
+                            size="icon"
+                            className="h-8 w-8"
+                            onClick={(e) => e.stopPropagation()}
+                          >
+                            <MoreHorizontal className="h-4 w-4" />
+                          </Button>
+                        </DropdownMenuTrigger>
+                        <DropdownMenuContent align="end">
+                          <DropdownMenuItem className="text-destructive" onClick={() => handleRemove(account)}>
+                            Remove Account
+                          </DropdownMenuItem>
+                        </DropdownMenuContent>
+                      </DropdownMenu>
                     </div>
-                    <div>
-                      <p className="font-medium text-foreground">{account.name}</p>
-                      <p className="text-xs text-muted-foreground">
-                        {account.institution} · {account.accountNumber}
+                    <div className="mt-4">
+                      <p className="text-2xl font-bold text-foreground">
+                        {format(account.current_balance)}
                       </p>
                     </div>
-                  </div>
-                  <DropdownMenu>
-                    <DropdownMenuTrigger asChild>
-                      <Button
-                        variant="ghost"
-                        size="icon"
-                        className="h-8 w-8"
-                        onClick={(e) => e.stopPropagation()}
-                      >
-                        <MoreHorizontal className="h-4 w-4" />
-                      </Button>
-                    </DropdownMenuTrigger>
-                    <DropdownMenuContent align="end">
-                      <DropdownMenuItem>View Transactions</DropdownMenuItem>
-                      <DropdownMenuItem>Transfer Money</DropdownMenuItem>
-                      <DropdownMenuItem>Sync Account</DropdownMenuItem>
-                      <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive">Remove Account</DropdownMenuItem>
-                    </DropdownMenuContent>
-                  </DropdownMenu>
-                </div>
-                <div className="mt-4">
-                  <p className="text-2xl font-bold text-foreground">
-                    ${account.balance.toLocaleString()}
-                  </p>
-                  <div className={`flex items-center gap-1 mt-1 text-sm ${
-                    account.change >= 0 ? "text-success" : "text-destructive"
-                  }`}>
-                    {account.change >= 0 ? (
-                      <TrendingUp className="h-4 w-4" />
-                    ) : (
-                      <TrendingDown className="h-4 w-4" />
-                    )}
-                    {account.change >= 0 ? "+" : ""}{account.change}% this month
-                  </div>
-                </div>
-                <div className="mt-2 flex items-center justify-between">
-                  <Badge variant="secondary" className="text-xs capitalize">
-                    {account.type}
-                  </Badge>
-                  <span className="text-xs text-muted-foreground">Synced {account.lastSync}</span>
-                </div>
-              </CardContent>
-            </Card>
-          ))}
+                    <div className="mt-2">
+                      <Badge variant="secondary" className="text-xs capitalize">
+                        {account.type}
+                      </Badge>
+                    </div>
+                  </CardContent>
+                </Card>
+              )
+            })
+          )}
         </div>
 
         <div className="lg:col-span-2 space-y-6">
           {!selectedAccount ? (
             <p className="py-12 text-center text-sm text-muted-foreground">Select an account to view details.</p>
           ) : (
-            <>
-              <Card>
-                <CardHeader>
-                  <div className="flex items-center justify-between">
-                    <div>
-                      <CardTitle className="text-base font-semibold">{selectedAccount.name}</CardTitle>
-                      <CardDescription>Balance history — last 6 months</CardDescription>
-                    </div>
-                    <div className="flex items-center gap-2">
-                      <Button variant="outline" size="sm">
-                        <ArrowRightLeft className="mr-2 h-4 w-4" />
-                        Transfer
-                      </Button>
-                    </div>
+            <Card>
+              <CardHeader>
+                <div className="flex items-center justify-between">
+                  <div>
+                    <CardTitle className="text-base font-semibold">Recent Transactions</CardTitle>
+                    <CardDescription>{selectedAccount.name}</CardDescription>
                   </div>
-                </CardHeader>
-                <CardContent>
-                  <ChartContainer config={chartConfig} className="h-55 w-full">
-                    <AreaChart
-                      data={selectedAccount.history}
-                      margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
+                  <Link href="/transactions">
+                    <Button variant="outline" size="sm">View All</Button>
+                  </Link>
+                </div>
+              </CardHeader>
+              <CardContent className="space-y-2">
+                {recentTxns.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No recent transactions.</p>
+                ) : (
+                  recentTxns.map((txn) => (
+                    <div
+                      key={txn.id}
+                      className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
                     >
-                      <defs>
-                        <linearGradient id="fillBankBalance" x1="0" y1="0" x2="0" y2="1">
-                          <stop offset="5%" stopColor="var(--color-balance)" stopOpacity={0.3} />
-                          <stop offset="95%" stopColor="var(--color-balance)" stopOpacity={0} />
-                        </linearGradient>
-                      </defs>
-                      <XAxis
-                        dataKey="month"
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        fontSize={12}
-                      />
-                      <YAxis
-                        tickLine={false}
-                        axisLine={false}
-                        tickMargin={8}
-                        fontSize={12}
-                        tickFormatter={(value) => `$${value / 1000}k`}
-                      />
-                      <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-                      <Area
-                        type="monotone"
-                        dataKey="balance"
-                        stroke="var(--color-balance)"
-                        strokeWidth={2}
-                        fill="url(#fillBankBalance)"
-                      />
-                    </AreaChart>
-                  </ChartContainer>
-                </CardContent>
-              </Card>
-
-              <Card>
-                <CardHeader>
-                  <CardTitle className="text-base font-semibold">Recent Transactions</CardTitle>
-                  <CardDescription>{selectedAccount.name} · last 30 days</CardDescription>
-                </CardHeader>
-                <CardContent className="space-y-2">
-                  {selectedAccount.recentTransactions.length === 0 ? (
-                    <p className="py-4 text-center text-sm text-muted-foreground">No recent transactions.</p>
-                  ) : (
-                    selectedAccount.recentTransactions.map((txn) => (
-                      <div
-                        key={txn.id}
-                        className="flex items-center justify-between rounded-lg p-3 transition-colors hover:bg-muted/50"
-                      >
-                        <div className="flex items-center gap-3">
-                          <div
-                            className={`flex h-9 w-9 items-center justify-center rounded-full ${
-                              txn.type === "income"
-                                ? "bg-success/10"
-                                : txn.type === "transfer"
-                                ? "bg-primary/10"
-                                : "bg-destructive/10"
-                            }`}
-                          >
-                            {txn.type === "income" ? (
-                              <ArrowDownLeft className="h-4 w-4 text-success" />
-                            ) : txn.type === "transfer" ? (
-                              <ArrowRightLeft className="h-4 w-4 text-primary" />
-                            ) : (
-                              <ArrowUpRight className="h-4 w-4 text-destructive" />
-                            )}
-                          </div>
-                          <div>
-                            <p className="text-sm font-medium text-foreground">{txn.title}</p>
-                            <p className="text-xs text-muted-foreground">{txn.date}</p>
-                          </div>
-                        </div>
-                        <span
-                          className={`text-sm font-semibold tabular-nums ${
-                            txn.amount > 0 ? "text-success" : "text-foreground"
+                      <div className="flex items-center gap-3">
+                        <div
+                          className={`flex h-9 w-9 items-center justify-center rounded-full ${
+                            txn.type === "income"
+                              ? "bg-success/10"
+                              : txn.type === "transfer"
+                              ? "bg-primary/10"
+                              : "bg-destructive/10"
                           }`}
                         >
-                          {txn.amount > 0 ? "+" : ""}${Math.abs(txn.amount).toLocaleString()}
-                        </span>
+                          {txn.type === "income" ? (
+                            <ArrowDownLeft className="h-4 w-4 text-success" />
+                          ) : txn.type === "transfer" ? (
+                            <ArrowRightLeft className="h-4 w-4 text-primary" />
+                          ) : (
+                            <ArrowUpRight className="h-4 w-4 text-destructive" />
+                          )}
+                        </div>
+                        <div>
+                          <p className="text-sm font-medium text-foreground">{txn.title}</p>
+                          <p className="text-xs text-muted-foreground">
+                            {new Date(txn.occurred_at).toLocaleDateString()}
+                          </p>
+                        </div>
                       </div>
-                    ))
-                  )}
-                  <div className="pt-2">
-                    <Link href="/transactions">
-                      <Button variant="outline" className="w-full">
-                        View All Transactions
-                      </Button>
-                    </Link>
-                  </div>
-                </CardContent>
-              </Card>
-            </>
+                      <span
+                        className={`text-sm font-semibold tabular-nums ${
+                          txn.type === "income" ? "text-success" : "text-foreground"
+                        }`}
+                      >
+                        {format(txn.type === "income" ? txn.amount : -txn.amount, { signDisplay: "exceptZero" })}
+                      </span>
+                    </div>
+                  ))
+                )}
+              </CardContent>
+            </Card>
           )}
         </div>
       </div>
+
+      <AddBankAccountDialog open={isAddOpen} onClose={() => setIsAddOpen(false)} onCreated={handleCreated} />
     </div>
   )
 }

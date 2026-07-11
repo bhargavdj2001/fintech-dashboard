@@ -1,7 +1,8 @@
 "use client"
 
 import { useState, useMemo, useEffect } from "react"
-import { fetchPeriodReport, type Transaction as ApiTransaction } from "@/lib/api"
+import { fetchPeriodReport, fetchNetWorthHistory, fetchAccounts, type Transaction as ApiTransaction, type NetWorthReport, type Account } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 import {
   Download,
   FileText,
@@ -27,8 +28,9 @@ import {
   startOfMonth,
   endOfMonth,
   format,
-  isWithinInterval,
   parseISO,
+  subMonths,
+  startOfYear,
 } from "date-fns"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
@@ -78,69 +80,15 @@ import {
 } from "@/components/ui/chart"
 import { DateRangePicker, type DateRange } from "@/components/date-range-picker"
 
-// ─── Static data ─────────────────────────────────────────────────────────────
+// ─── Chart color palette ──────────────────────────────────────────────────────
 
-const monthlyOverview = [
-  { month: "Jan", income: 8500, expenses: 6200, savings: 2300 },
-  { month: "Feb", income: 9200, expenses: 5800, savings: 3400 },
-  { month: "Mar", income: 8800, expenses: 7100, savings: 1700 },
-  { month: "Apr", income: 9500, expenses: 6400, savings: 3100 },
-  { month: "May", income: 10200, expenses: 7200, savings: 3000 },
-  { month: "Jun", income: 9800, expenses: 6800, savings: 3000 },
-  { month: "Jul", income: 11000, expenses: 7500, savings: 3500 },
-  { month: "Aug", income: 10500, expenses: 6900, savings: 3600 },
-  { month: "Sep", income: 9900, expenses: 7100, savings: 2800 },
-  { month: "Oct", income: 10800, expenses: 7400, savings: 3400 },
-  { month: "Nov", income: 11200, expenses: 7800, savings: 3400 },
-  { month: "Dec", income: 12500, expenses: 9200, savings: 3300 },
-]
-
-const netWorthHistory = [
-  { month: "Jan", netWorth: 185000 },
-  { month: "Feb", netWorth: 192000 },
-  { month: "Mar", netWorth: 198000 },
-  { month: "Apr", netWorth: 205000 },
-  { month: "May", netWorth: 212000 },
-  { month: "Jun", netWorth: 218000 },
-  { month: "Jul", netWorth: 225000 },
-  { month: "Aug", netWorth: 232000 },
-  { month: "Sep", netWorth: 238000 },
-  { month: "Oct", netWorth: 242000 },
-  { month: "Nov", netWorth: 246000 },
-  { month: "Dec", netWorth: 248750 },
-]
-
-const categoryBreakdown = [
-  { name: "Housing", amount: 2200, percentage: 32.4, color: "var(--chart-1)" },
-  { name: "Food & Dining", amount: 1200, percentage: 17.6, color: "var(--chart-2)" },
-  { name: "Transportation", amount: 650, percentage: 9.6, color: "var(--chart-3)" },
-  { name: "Entertainment", amount: 450, percentage: 6.6, color: "var(--chart-4)" },
-  { name: "Utilities", amount: 380, percentage: 5.6, color: "var(--chart-5)" },
-  { name: "Shopping", amount: 720, percentage: 10.6, color: "var(--muted)" },
-  { name: "Healthcare", amount: 200, percentage: 2.9, color: "var(--chart-1)" },
-  { name: "Other", amount: 1000, percentage: 14.7, color: "var(--chart-2)" },
-]
-
-const incomeBreakdown = [
-  { name: "Salary", amount: 9500, percentage: 76, color: "var(--chart-1)" },
-  { name: "Freelance", amount: 1800, percentage: 14.4, color: "var(--chart-2)" },
-  { name: "Investments", amount: 850, percentage: 6.8, color: "var(--chart-3)" },
-  { name: "Other", amount: 350, percentage: 2.8, color: "var(--chart-4)" },
-]
-
-const topMerchants = [
-  { name: "Amazon", amount: 892, transactions: 24, trend: 12.5 },
-  { name: "Whole Foods", amount: 654, transactions: 18, trend: -5.2 },
-  { name: "Shell Gas", amount: 423, transactions: 12, trend: 8.1 },
-  { name: "Netflix", amount: 191, transactions: 12, trend: 0 },
-  { name: "Starbucks", amount: 178, transactions: 32, trend: 15.3 },
-]
-
-const accountSummary = [
-  { name: "Checking", balance: 12450, change: 2.5 },
-  { name: "Savings", balance: 45200, change: 1.8 },
-  { name: "Credit Card", balance: -2340, change: -15.2 },
-  { name: "Investment", balance: 156750, change: 8.5 },
+const CHART_COLORS = [
+  "var(--chart-1)",
+  "var(--chart-2)",
+  "var(--chart-3)",
+  "var(--chart-4)",
+  "var(--chart-5)",
+  "var(--muted)",
 ]
 
 // ─── Period Analysis types ────────────────────────────────────────────────────
@@ -162,16 +110,6 @@ interface PeriodTxn {
   isSplit: boolean
 }
 
-const accountSpendData = [
-  { account: "Checking", amount: 2854, color: "var(--chart-1)" },
-  { account: "Credit Card", amount: 1890, color: "var(--chart-2)" },
-  { account: "Debit Card", amount: 510, color: "var(--chart-3)" },
-]
-
-const comparisonMetrics = {
-  current: { label: "Mar 2024", income: 7550, expenses: 3394.99, shared: 2353 },
-  previous: { label: "Feb 2024", income: 5200, expenses: 2400.59, shared: 2278 },
-}
 
 // ─── Chart configs ────────────────────────────────────────────────────────────
 
@@ -246,6 +184,7 @@ function apiTxnToPeriod(t: ApiTransaction): PeriodTxn {
 }
 
 function PeriodAnalysisTab() {
+  const { format: formatMoney, formatCompact } = useCurrency()
   const defaultRange: DateRange = {
     from: startOfMonth(new Date()),
     to: new Date(),
@@ -253,6 +192,7 @@ function PeriodAnalysisTab() {
 
   const [dateRange, setDateRange] = useState<DateRange>(defaultRange)
   const [apiTxns, setApiTxns] = useState<PeriodTxn[]>([])
+  const [prevApiTxns, setPrevApiTxns] = useState<ApiTransaction[]>([])
   const [search, setSearch] = useState("")
   const [typeFilter, setTypeFilter] = useState("all")
   const [sortField, setSortField] = useState<"date" | "amount">("date")
@@ -265,6 +205,15 @@ function PeriodAnalysisTab() {
     fetchPeriodReport(params)
       .then((report) => setApiTxns(report.transactions.map(apiTxnToPeriod)))
       .catch(console.error)
+
+    if (dateRange.from && dateRange.to) {
+      const duration = dateRange.to.getTime() - dateRange.from.getTime()
+      const prevEnd = new Date(dateRange.from.getTime() - 1)
+      const prevStart = new Date(prevEnd.getTime() - duration)
+      fetchPeriodReport({ start_date: prevStart.toISOString(), end_date: prevEnd.toISOString() })
+        .then((r) => setPrevApiTxns(r.transactions))
+        .catch(() => {})
+    }
   }, [dateRange])
 
   const periodTxns = apiTxns
@@ -275,6 +224,43 @@ function PeriodAnalysisTab() {
     const transfers = periodTxns.filter((t) => t.type === "transfer").reduce((s, t) => s + Math.abs(t.amount), 0)
     return { income, expenses, transfers, net: income - expenses, count: periodTxns.length }
   }, [periodTxns])
+
+  const accountSpendData = useMemo(() => {
+    const map: Record<string, number> = {}
+    periodTxns.filter((t) => t.type === "expense").forEach((t) => {
+      const acct = t.account !== "—" ? t.account : "Unknown"
+      map[acct] = (map[acct] ?? 0) + Math.abs(t.amount)
+    })
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .slice(0, 4)
+      .map(([account, amount], i) => ({
+        account,
+        amount: Math.round(amount * 100) / 100,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+      }))
+  }, [periodTxns])
+
+  const prevSummary = useMemo(() => {
+    const income = prevApiTxns.filter((t) => t.type === "income").reduce((s, t) => s + t.amount, 0)
+    const expenses = prevApiTxns.filter((t) => t.type === "expense").reduce((s, t) => s + Math.abs(t.amount), 0)
+    return { income, expenses, net: income - expenses }
+  }, [prevApiTxns])
+
+  const comparisonMetrics = useMemo(() => ({
+    current: {
+      label: dateRange.to ? format(dateRange.to, "MMM yyyy") : "Current",
+      income: summary.income,
+      expenses: summary.expenses,
+      net: summary.net,
+    },
+    previous: {
+      label: dateRange.from ? format(new Date(dateRange.from.getTime() - 1), "MMM yyyy") : "Previous",
+      income: prevSummary.income,
+      expenses: prevSummary.expenses,
+      net: prevSummary.net,
+    },
+  }), [dateRange, summary, prevSummary])
 
   const categoryData = useMemo(() => {
     const map: Record<string, number> = {}
@@ -342,10 +328,10 @@ function PeriodAnalysisTab() {
       {/* Summary cards */}
       <div className="grid gap-4 md:grid-cols-2 lg:grid-cols-5">
         {[
-          { label: "Total Income", value: `+$${summary.income.toLocaleString()}`, cls: "text-success" },
-          { label: "Total Expenses", value: `-$${summary.expenses.toLocaleString()}`, cls: "text-destructive" },
-          { label: "Transfers", value: `$${summary.transfers.toLocaleString()}`, cls: "text-primary" },
-          { label: "Net Cashflow", value: `${summary.net >= 0 ? "+" : ""}$${summary.net.toLocaleString()}`, cls: summary.net >= 0 ? "text-success" : "text-destructive" },
+          { label: "Total Income", value: formatMoney(summary.income, { signDisplay: "always" }), cls: "text-success" },
+          { label: "Total Expenses", value: formatMoney(-summary.expenses, { signDisplay: "always" }), cls: "text-destructive" },
+          { label: "Transfers", value: formatMoney(summary.transfers), cls: "text-primary" },
+          { label: "Net Cashflow", value: formatMoney(summary.net, { signDisplay: "exceptZero" }), cls: summary.net >= 0 ? "text-success" : "text-destructive" },
           { label: "Transactions", value: String(summary.count), cls: "text-foreground" },
         ].map((card) => (
           <Card key={card.label}>
@@ -379,7 +365,7 @@ function PeriodAnalysisTab() {
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-xs text-muted-foreground">Total</span>
-                      <span className="text-base font-bold">${summary.expenses.toLocaleString()}</span>
+                      <span className="text-base font-bold">{formatMoney(summary.expenses)}</span>
                     </div>
                   </div>
                 </div>
@@ -390,7 +376,7 @@ function PeriodAnalysisTab() {
                         <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                         <span className="text-muted-foreground">{item.name}</span>
                       </div>
-                      <span className="font-medium tabular-nums">${item.amount.toLocaleString()}</span>
+                      <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -421,7 +407,7 @@ function PeriodAnalysisTab() {
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-xs text-muted-foreground">Total</span>
-                      <span className="text-base font-bold text-success">${summary.income.toLocaleString()}</span>
+                      <span className="text-base font-bold text-success">{formatMoney(summary.income)}</span>
                     </div>
                   </div>
                 </div>
@@ -432,7 +418,7 @@ function PeriodAnalysisTab() {
                         <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                         <span className="text-muted-foreground">{item.name}</span>
                       </div>
-                      <span className="font-medium tabular-nums">${item.amount.toLocaleString()}</span>
+                      <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -452,7 +438,7 @@ function PeriodAnalysisTab() {
           <CardContent>
             <ChartContainer config={periodChartConfig} className="h-[160px] w-full">
               <BarChart data={accountSpendData} layout="vertical" margin={{ top: 0, right: 10, left: 0, bottom: 0 }}>
-                <XAxis type="number" tickLine={false} axisLine={false} fontSize={11} tickFormatter={(v) => `$${v}`} />
+                <XAxis type="number" tickLine={false} axisLine={false} fontSize={11} tickFormatter={(v) => formatCompact(v)} />
                 <YAxis type="category" dataKey="account" tickLine={false} axisLine={false} fontSize={11} width={75} />
                 <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                 <Bar dataKey="amount" radius={[0, 4, 4, 0]}>
@@ -467,7 +453,7 @@ function PeriodAnalysisTab() {
                     <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                     <span className="text-muted-foreground">{item.account}</span>
                   </div>
-                  <span className="font-medium tabular-nums">${item.amount.toLocaleString()}</span>
+                  <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
                 </div>
               ))}
             </div>
@@ -488,7 +474,7 @@ function PeriodAnalysisTab() {
             {[
               { label: "Total Spending", icon: ArrowUpRight, cur: comparisonMetrics.current.expenses, prev: comparisonMetrics.previous.expenses, higherIsBad: true },
               { label: "Total Income", icon: ArrowDownLeft, cur: comparisonMetrics.current.income, prev: comparisonMetrics.previous.income, higherIsBad: false },
-              { label: "Shared Expenses", icon: ArrowUpRight, cur: comparisonMetrics.current.shared, prev: comparisonMetrics.previous.shared, higherIsBad: true },
+              { label: "Net Cashflow", icon: Wallet, cur: comparisonMetrics.current.net, prev: comparisonMetrics.previous.net, higherIsBad: false },
             ].map((metric) => {
               const change = pct(metric.cur, metric.prev)
               const isGood = metric.higherIsBad ? change < 0 : change > 0
@@ -500,8 +486,8 @@ function PeriodAnalysisTab() {
                     <Icon className="h-4 w-4 text-muted-foreground" />
                   </div>
                   <div>
-                    <p className="text-2xl font-bold tabular-nums text-foreground">${metric.cur.toLocaleString()}</p>
-                    <p className="text-xs text-muted-foreground mt-0.5">vs ${metric.prev.toLocaleString()} last period</p>
+                    <p className="text-2xl font-bold tabular-nums text-foreground">{formatMoney(metric.cur)}</p>
+                    <p className="text-xs text-muted-foreground mt-0.5">vs {formatMoney(metric.prev)} last period</p>
                   </div>
                   <div className={`flex items-center gap-1 text-sm font-medium ${isGood ? "text-success" : "text-destructive"}`}>
                     {isGood ? <TrendingUp className="h-3.5 w-3.5" /> : <TrendingDown className="h-3.5 w-3.5" />}
@@ -611,7 +597,7 @@ function PeriodAnalysisTab() {
                     </TableCell>
                     <TableCell className="text-right">
                       <span className={`tabular-nums font-semibold text-sm ${txn.type === "income" ? "text-success" : txn.type === "transfer" ? "text-primary" : "text-foreground"}`}>
-                        {txn.amount > 0 ? "+" : ""}${Math.abs(txn.amount).toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                        {formatMoney(txn.amount, { signDisplay: "exceptZero" })}
                       </span>
                     </TableCell>
                   </TableRow>
@@ -628,12 +614,111 @@ function PeriodAnalysisTab() {
 // ─── Main page ────────────────────────────────────────────────────────────────
 
 export default function ReportsPage() {
+  const { format: formatMoney, formatCompact } = useCurrency()
   const [period, setPeriod] = useState("12m")
+  const [netWorthReport, setNetWorthReport] = useState<NetWorthReport | null>(null)
+  const [reportTxns, setReportTxns] = useState<ApiTransaction[]>([])
+  const [accounts, setAccounts] = useState<Account[]>([])
 
-  const totalIncome = monthlyOverview.reduce((acc, m) => acc + m.income, 0)
-  const totalExpenses = monthlyOverview.reduce((acc, m) => acc + m.expenses, 0)
+  useEffect(() => {
+    fetchNetWorthHistory().then(setNetWorthReport).catch(console.error)
+    fetchAccounts().then(setAccounts).catch(console.error)
+  }, [])
+
+  useEffect(() => {
+    const now = new Date()
+    let startDate: Date
+    let endDate: Date = now
+    if (period === "1m") {
+      startDate = startOfMonth(subMonths(now, 1))
+      endDate = endOfMonth(subMonths(now, 1))
+    } else if (period === "3m") {
+      startDate = startOfMonth(subMonths(now, 3))
+    } else if (period === "6m") {
+      startDate = startOfMonth(subMonths(now, 6))
+    } else if (period === "ytd") {
+      startDate = startOfYear(now)
+    } else {
+      startDate = startOfMonth(subMonths(now, 12))
+    }
+    fetchPeriodReport({ start_date: startDate.toISOString(), end_date: endDate.toISOString() })
+      .then((r) => setReportTxns(r.transactions))
+      .catch(console.error)
+  }, [period])
+
+  const monthlyOverview = useMemo(() => {
+    const monthMap: Record<string, { income: number; expenses: number; year: number; monthNum: number }> = {}
+    reportTxns.forEach((t) => {
+      const d = parseISO(t.occurred_at)
+      const year = d.getFullYear()
+      const monthNum = d.getMonth()
+      const key = `${year}-${String(monthNum).padStart(2, "0")}`
+      if (!monthMap[key]) monthMap[key] = { income: 0, expenses: 0, year, monthNum }
+      if (t.type === "income") monthMap[key].income += t.amount
+      else if (t.type === "expense") monthMap[key].expenses += Math.abs(t.amount)
+    })
+    return Object.entries(monthMap)
+      .sort(([a], [b]) => a.localeCompare(b))
+      .map(([, v]) => ({
+        month: format(new Date(v.year, v.monthNum, 1), "MMM"),
+        income: Math.round(v.income),
+        expenses: Math.round(v.expenses),
+        savings: Math.round(v.income - v.expenses),
+      }))
+  }, [reportTxns])
+
+  const categoryBreakdown = useMemo(() => {
+    const map: Record<string, number> = {}
+    reportTxns.filter((t) => t.type === "expense").forEach((t) => {
+      const cat = t.category?.name ?? "Uncategorized"
+      map[cat] = (map[cat] ?? 0) + Math.abs(t.amount)
+    })
+    const total = Object.values(map).reduce((s, v) => s + v, 0)
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amount], i) => ({
+        name,
+        amount: Math.round(amount * 100) / 100,
+        percentage: total > 0 ? Math.round((amount / total) * 1000) / 10 : 0,
+        color: CHART_COLORS[i % CHART_COLORS.length],
+      }))
+  }, [reportTxns])
+
+  const incomeBreakdown = useMemo(() => {
+    const map: Record<string, number> = {}
+    reportTxns.filter((t) => t.type === "income").forEach((t) => {
+      const cat = t.category?.name ?? "Other"
+      map[cat] = (map[cat] ?? 0) + t.amount
+    })
+    const colors = ["var(--chart-1)", "var(--chart-2)", "var(--chart-3)", "var(--chart-4)"]
+    return Object.entries(map)
+      .sort((a, b) => b[1] - a[1])
+      .map(([name, amount], i) => ({ name, amount: Math.round(amount * 100) / 100, percentage: 0, color: colors[i % colors.length] }))
+  }, [reportTxns])
+
+  const topMerchants = useMemo(() => {
+    const map: Record<string, { amount: number; count: number }> = {}
+    reportTxns.filter((t) => t.type === "expense").forEach((t) => {
+      const m = t.merchant ?? t.account?.name ?? "Unknown"
+      if (!map[m]) map[m] = { amount: 0, count: 0 }
+      map[m].amount += Math.abs(t.amount)
+      map[m].count++
+    })
+    return Object.entries(map)
+      .sort((a, b) => b[1].amount - a[1].amount)
+      .slice(0, 5)
+      .map(([name, v]) => ({ name, amount: Math.round(v.amount * 100) / 100, transactions: v.count, trend: 0 }))
+  }, [reportTxns])
+
+  const accountSummary = useMemo(
+    () => accounts.map((a) => ({ name: a.name, balance: a.current_balance })),
+    [accounts],
+  )
+
+  const totalIncome = useMemo(() => monthlyOverview.reduce((acc, m) => acc + m.income, 0), [monthlyOverview])
+  const totalExpenses = useMemo(() => monthlyOverview.reduce((acc, m) => acc + m.expenses, 0), [monthlyOverview])
   const totalSavings = totalIncome - totalExpenses
-  const avgSavingsRate = (totalSavings / totalIncome) * 100
+  const avgSavingsRate = totalIncome > 0 ? (totalSavings / totalIncome) * 100 : 0
 
   return (
     <div className="space-y-6">
@@ -668,7 +753,7 @@ export default function ReportsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Income</p>
-                <p className="text-2xl font-bold text-success">${totalIncome.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-success">{formatMoney(totalIncome)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
                 <ArrowDownLeft className="h-5 w-5 text-success" />
@@ -681,7 +766,7 @@ export default function ReportsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Total Expenses</p>
-                <p className="text-2xl font-bold text-destructive">${totalExpenses.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-destructive">{formatMoney(totalExpenses)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
                 <ArrowUpRight className="h-5 w-5 text-destructive" />
@@ -694,7 +779,7 @@ export default function ReportsPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Net Savings</p>
-                <p className="text-2xl font-bold text-foreground">${totalSavings.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-foreground">{formatMoney(totalSavings)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                 <Wallet className="h-5 w-5 text-primary" />
@@ -747,7 +832,7 @@ export default function ReportsPage() {
               <ChartContainer config={overviewChartConfig} className="h-[350px] w-full">
                 <BarChart data={monthlyOverview} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                   <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v / 1000}k`} />
+                  <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                   <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                   <Bar dataKey="income" fill="var(--color-income)" radius={[4, 4, 0, 0]} />
                   <Bar dataKey="expenses" fill="var(--color-expenses)" radius={[4, 4, 0, 0]} />
@@ -772,7 +857,7 @@ export default function ReportsPage() {
                       </linearGradient>
                     </defs>
                     <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v / 1000}k`} />
+                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                     <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
                     <Area type="monotone" dataKey="savings" stroke="var(--color-savings)" strokeWidth={2} fill="url(#fillSavings)" />
                   </AreaChart>
@@ -786,29 +871,27 @@ export default function ReportsPage() {
                 <CardDescription>Current balances by account</CardDescription>
               </CardHeader>
               <CardContent className="space-y-4">
-                {accountSummary.map((account) => (
-                  <div key={account.name} className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
-                    <div className="flex items-center gap-3">
-                      <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
-                        {account.name === "Credit Card" ? (
-                          <CreditCard className="h-5 w-5 text-muted-foreground" />
-                        ) : (
-                          <Wallet className="h-5 w-5 text-muted-foreground" />
-                        )}
+                {accountSummary.length === 0 ? (
+                  <p className="py-4 text-center text-sm text-muted-foreground">No accounts found</p>
+                ) : (
+                  accountSummary.map((account) => (
+                    <div key={account.name} className="flex items-center justify-between rounded-lg bg-muted/50 px-4 py-3">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-background">
+                          {account.name.toLowerCase().includes("credit") ? (
+                            <CreditCard className="h-5 w-5 text-muted-foreground" />
+                          ) : (
+                            <Wallet className="h-5 w-5 text-muted-foreground" />
+                          )}
+                        </div>
+                        <span className="font-medium text-foreground">{account.name}</span>
                       </div>
-                      <span className="font-medium text-foreground">{account.name}</span>
-                    </div>
-                    <div className="text-right">
                       <p className={`font-semibold tabular-nums ${account.balance < 0 ? "text-destructive" : "text-foreground"}`}>
-                        {account.balance < 0 ? "-" : ""}${Math.abs(account.balance).toLocaleString()}
+                        {formatMoney(account.balance)}
                       </p>
-                      <div className={`flex items-center justify-end gap-1 text-xs ${account.change >= 0 ? "text-success" : "text-destructive"}`}>
-                        {account.change >= 0 ? <TrendingUp className="h-3 w-3" /> : <TrendingDown className="h-3 w-3" />}
-                        {account.change >= 0 ? "+" : ""}{account.change}%
-                      </div>
                     </div>
-                  </div>
-                ))}
+                  ))
+                )}
               </CardContent>
             </Card>
           </div>
@@ -826,7 +909,7 @@ export default function ReportsPage() {
                 <ChartContainer config={overviewChartConfig} className="h-[300px] w-full">
                   <RechartsLineChart data={monthlyOverview} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                     <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v / 1000}k`} />
+                    <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                     <ChartTooltip content={<ChartTooltipContent />} />
                     <Line type="monotone" dataKey="income" stroke="var(--color-income)" strokeWidth={2.5} dot={{ fill: "var(--color-income)", strokeWidth: 0, r: 4 }} />
                   </RechartsLineChart>
@@ -851,7 +934,7 @@ export default function ReportsPage() {
                     </ResponsiveContainer>
                     <div className="absolute inset-0 flex flex-col items-center justify-center">
                       <span className="text-xs text-muted-foreground">Avg/mo</span>
-                      <span className="text-lg font-bold">${(totalIncome / 12 / 1000).toFixed(1)}k</span>
+                      <span className="text-lg font-bold">{formatCompact(monthlyOverview.length > 0 ? totalIncome / monthlyOverview.length : 0)}</span>
                     </div>
                   </div>
                 </div>
@@ -862,7 +945,7 @@ export default function ReportsPage() {
                         <div className="h-2.5 w-2.5 rounded-full" style={{ backgroundColor: item.color }} />
                         <span className="text-muted-foreground">{item.name}</span>
                       </div>
-                      <span className="font-medium tabular-nums">${item.amount.toLocaleString()}</span>
+                      <span className="font-medium tabular-nums">{formatMoney(item.amount)}</span>
                     </div>
                   ))}
                 </div>
@@ -882,7 +965,7 @@ export default function ReportsPage() {
               <CardContent>
                 <ChartContainer config={overviewChartConfig} className="h-[300px] w-full">
                   <BarChart data={categoryBreakdown} layout="vertical" margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                    <XAxis type="number" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v}`} />
+                    <XAxis type="number" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                     <YAxis type="category" dataKey="name" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} width={100} />
                     <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                     <Bar dataKey="amount" fill="var(--chart-4)" radius={[0, 4, 4, 0]} />
@@ -907,7 +990,7 @@ export default function ReportsPage() {
                       </div>
                     </div>
                     <div className="text-right">
-                      <p className="text-sm font-semibold tabular-nums">${merchant.amount}</p>
+                      <p className="text-sm font-semibold tabular-nums">{formatMoney(merchant.amount)}</p>
                       <div className={`flex items-center justify-end gap-1 text-xs ${merchant.trend > 0 ? "text-destructive" : merchant.trend < 0 ? "text-success" : "text-muted-foreground"}`}>
                         {merchant.trend > 0 ? <TrendingUp className="h-3 w-3" /> : merchant.trend < 0 ? <TrendingDown className="h-3 w-3" /> : null}
                         {merchant.trend !== 0 && `${Math.abs(merchant.trend)}%`}
@@ -932,7 +1015,7 @@ export default function ReportsPage() {
                       <span className="text-sm text-muted-foreground">{category.name}</span>
                       <Badge variant="secondary" className="text-xs">{category.percentage}%</Badge>
                     </div>
-                    <p className="mt-2 text-xl font-bold text-foreground">${category.amount.toLocaleString()}</p>
+                    <p className="mt-2 text-xl font-bold text-foreground">{formatMoney(category.amount)}</p>
                     <div className="mt-2 h-1.5 w-full rounded-full bg-muted">
                       <div className="h-full rounded-full" style={{ width: `${category.percentage}%`, backgroundColor: category.color }} />
                     </div>
@@ -945,81 +1028,116 @@ export default function ReportsPage() {
 
         {/* Net Worth tab */}
         <TabsContent value="networth" className="space-y-6">
-          <Card>
-            <CardHeader>
-              <div className="flex items-center justify-between">
-                <div>
-                  <CardTitle className="text-base font-semibold">Net Worth History</CardTitle>
-                  <CardDescription>Track your wealth over time</CardDescription>
-                </div>
-                <div className="text-right">
-                  <p className="text-sm text-muted-foreground">Current Net Worth</p>
-                  <p className="text-2xl font-bold text-foreground">$248,750</p>
-                  <div className="flex items-center justify-end gap-1 text-sm text-success">
-                    <TrendingUp className="h-4 w-4" />+34.5% YoY
-                  </div>
-                </div>
-              </div>
-            </CardHeader>
-            <CardContent>
-              <ChartContainer config={overviewChartConfig} className="h-[350px] w-full">
-                <AreaChart data={netWorthHistory} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <defs>
-                    <linearGradient id="fillNetWorth" x1="0" y1="0" x2="0" y2="1">
-                      <stop offset="5%" stopColor="var(--color-netWorth)" stopOpacity={0.3} />
-                      <stop offset="95%" stopColor="var(--color-netWorth)" stopOpacity={0} />
-                    </linearGradient>
-                  </defs>
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                  <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v / 1000}k`} />
-                  <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
-                  <Area type="monotone" dataKey="netWorth" stroke="var(--color-netWorth)" strokeWidth={2.5} fill="url(#fillNetWorth)" />
-                </AreaChart>
-              </ChartContainer>
-            </CardContent>
-          </Card>
+          {(() => {
+            const history = netWorthReport?.history ?? []
+            const hasHistory = history.length >= 2
+            const chartData = history.map((h) => ({
+              date: h.snapshot_date,
+              netWorth: h.net_worth,
+            }))
+            const change = hasHistory ? history[history.length - 1].net_worth - history[0].net_worth : 0
 
-          <div className="grid gap-4 md:grid-cols-3">
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
-                    <TrendingUp className="h-5 w-5 text-success" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total Assets</p>
-                    <p className="text-xl font-bold text-foreground">$312,500</p>
-                  </div>
+            return (
+              <>
+                <Card>
+                  <CardHeader>
+                    <div className="flex items-center justify-between">
+                      <div>
+                        <CardTitle className="text-base font-semibold">Net Worth History</CardTitle>
+                        <CardDescription>
+                          {hasHistory ? "Track your wealth over time" : "History will build up over time — a snapshot is recorded daily"}
+                        </CardDescription>
+                      </div>
+                      <div className="text-right">
+                        <p className="text-sm text-muted-foreground">Current Net Worth</p>
+                        <p className="text-2xl font-bold text-foreground">
+                          {formatMoney(netWorthReport?.current_net_worth ?? 0)}
+                        </p>
+                        {hasHistory && (
+                          <div className={`flex items-center justify-end gap-1 text-sm ${change >= 0 ? "text-success" : "text-destructive"}`}>
+                            {change >= 0 ? <TrendingUp className="h-4 w-4" /> : <TrendingDown className="h-4 w-4" />}
+                            {formatMoney(change, { signDisplay: "always" })} since first recorded
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  </CardHeader>
+                  <CardContent>
+                    {hasHistory ? (
+                      <ChartContainer config={overviewChartConfig} className="h-[350px] w-full">
+                        <AreaChart data={chartData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                          <defs>
+                            <linearGradient id="fillNetWorth" x1="0" y1="0" x2="0" y2="1">
+                              <stop offset="5%" stopColor="var(--color-netWorth)" stopOpacity={0.3} />
+                              <stop offset="95%" stopColor="var(--color-netWorth)" stopOpacity={0} />
+                            </linearGradient>
+                          </defs>
+                          <XAxis dataKey="date" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
+                          <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
+                          <ChartTooltip cursor={false} content={<ChartTooltipContent indicator="line" />} />
+                          <Area type="monotone" dataKey="netWorth" stroke="var(--color-netWorth)" strokeWidth={2.5} fill="url(#fillNetWorth)" />
+                        </AreaChart>
+                      </ChartContainer>
+                    ) : (
+                      <div className="flex h-[200px] items-center justify-center text-center">
+                        <p className="text-sm text-muted-foreground max-w-sm">
+                          Net worth history builds up one day at a time. Check back after a few days to see your trend.
+                        </p>
+                      </div>
+                    )}
+                  </CardContent>
+                </Card>
+
+                <div className="grid gap-4 md:grid-cols-3">
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-success/10">
+                          <TrendingUp className="h-5 w-5 text-success" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Assets</p>
+                          <p className="text-xl font-bold text-foreground">
+                            {formatMoney(netWorthReport?.current_total_assets ?? 0)}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
+                          <TrendingDown className="h-5 w-5 text-destructive" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Total Liabilities</p>
+                          <p className="text-xl font-bold text-destructive">
+                            {formatMoney(netWorthReport?.current_total_liabilities ?? 0)}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
+                  <Card>
+                    <CardContent className="pt-6">
+                      <div className="flex items-center gap-3">
+                        <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
+                          <Wallet className="h-5 w-5 text-primary" />
+                        </div>
+                        <div>
+                          <p className="text-sm text-muted-foreground">Change</p>
+                          <p className={`text-xl font-bold ${change >= 0 ? "text-success" : "text-destructive"}`}>
+                            {hasHistory ? formatMoney(change, { signDisplay: "always" }) : "—"}
+                          </p>
+                        </div>
+                      </div>
+                    </CardContent>
+                  </Card>
                 </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-destructive/10">
-                    <TrendingDown className="h-5 w-5 text-destructive" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Total Liabilities</p>
-                    <p className="text-xl font-bold text-destructive">$63,750</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-            <Card>
-              <CardContent className="pt-6">
-                <div className="flex items-center gap-3">
-                  <div className="flex h-10 w-10 items-center justify-center rounded-lg bg-primary/10">
-                    <Wallet className="h-5 w-5 text-primary" />
-                  </div>
-                  <div>
-                    <p className="text-sm text-muted-foreground">Monthly Change</p>
-                    <p className="text-xl font-bold text-success">+$5,750</p>
-                  </div>
-                </div>
-              </CardContent>
-            </Card>
-          </div>
+              </>
+            )
+          })()}
         </TabsContent>
 
         {/* Period Analysis tab */}

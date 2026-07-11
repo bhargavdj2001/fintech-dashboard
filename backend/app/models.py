@@ -1,7 +1,8 @@
 """
-SQLAlchemy ORM models — aligned to the existing Supabase schema.
-Column names and types match the schema export exactly.
-Do NOT run migrations.
+SQLAlchemy ORM models — aligned to the schema created in scripts/schema.sql.
+Column names and types must match that DDL exactly. Schema changes go through
+scripts/schema.sql (or a follow-up migration file) and are applied directly to
+Supabase first — SQLAlchemy does not own migrations here.
 """
 import uuid
 from sqlalchemy import (
@@ -31,7 +32,29 @@ class User(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     email = Column(String, nullable=False)
     name = Column(String, nullable=True)
+    password_hash = Column(String, nullable=True)
+    totp_secret = Column(String, nullable=True)
+    totp_enabled = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+    sessions = relationship("Session", back_populates="user", cascade="all, delete-orphan")
+
+
+class Session(Base):
+    __tablename__ = "sessions"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    user_id = Column(UUID(as_uuid=True), ForeignKey("users.id"), nullable=False)
+    jti = Column(UUID(as_uuid=True), nullable=False, unique=True)
+    device = Column(String, nullable=True)
+    user_agent = Column(String, nullable=True)
+    ip_address = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    last_seen_at = Column(DateTime(timezone=True), server_default=func.now())
+    expires_at = Column(DateTime(timezone=True), nullable=False)
+    revoked = Column(Boolean, nullable=False, default=False)
+
+    user = relationship("User", back_populates="sessions")
 
 
 class Household(Base):
@@ -46,7 +69,6 @@ class Household(Base):
     accounts = relationship("Account", back_populates="household")
     categories = relationship("Category", back_populates="household")
     budgets = relationship("Budget", back_populates="household")
-    tags = relationship("Tag", back_populates="household")
     settlements = relationship("Settlement", back_populates="household")
 
 
@@ -59,6 +81,7 @@ class Profile(Base):
     email = Column(String, nullable=True)
     avatar_url = Column(String, nullable=True)
     default_share = Column(Numeric(5, 4), nullable=True)  # e.g. 0.5000 = 50%
+    is_owner = Column(Boolean, nullable=False, default=False)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     household = relationship("Household", back_populates="profiles")
@@ -81,9 +104,12 @@ class Account(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=False)
     name = Column(String, nullable=False)
-    type = Column(String, nullable=False)          # USER-DEFINED enum in DB
-    currency = Column(String, nullable=False, default="USD")
-    balance = Column(Numeric(14, 2), nullable=False, default=0)
+    type = Column(String, nullable=False)          # checking | savings | credit | cash | investment
+    currency = Column(String, nullable=False, default="INR")
+    # Balance as of when the account was added — the *current* balance is
+    # opening_balance + a live computation from transactions, never stored.
+    # See account_service.attach_current_balances().
+    opening_balance = Column(Numeric(14, 2), nullable=False, default=0)
     external_id = Column(String, nullable=True)
     last_synced_at = Column(DateTime(timezone=True), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
@@ -128,13 +154,13 @@ class Transaction(Base):
     merchant = Column(String, nullable=True)
     description = Column(Text, nullable=True)
     amount = Column(Numeric(14, 2), nullable=False)
-    currency = Column(String, nullable=False, default="USD")
-    type = Column(String, nullable=False)           # USER-DEFINED: income | expense | transfer
+    currency = Column(String, nullable=False, default="INR")
+    type = Column(String, nullable=False)           # income | expense | transfer
     category_id = Column(UUID(as_uuid=True), ForeignKey("categories.id"), nullable=True)
     occurred_at = Column(DateTime(timezone=True), nullable=False)
     status = Column(String, nullable=True, default="cleared")
     is_recurring_instance = Column(Boolean, nullable=False, default=False)
-    recurring_rule_id = Column(UUID(as_uuid=True), nullable=True)
+    recurring_rule_id = Column(UUID(as_uuid=True), ForeignKey("recurring_rules.id"), nullable=True)
     imported_from = Column(String, nullable=True)
     receipt_url = Column(String, nullable=True)
     transfer_group_id = Column(UUID(as_uuid=True), nullable=True)
@@ -145,11 +171,6 @@ class Transaction(Base):
     splits = relationship(
         "TransactionSplit", back_populates="transaction", cascade="all, delete-orphan"
     )
-    transaction_tags = relationship(
-        "TransactionTag", back_populates="transaction", cascade="all, delete-orphan"
-    )
-
-
 class TransactionSplit(Base):
     __tablename__ = "transaction_splits"
 
@@ -163,31 +184,6 @@ class TransactionSplit(Base):
 
     transaction = relationship("Transaction", back_populates="splits")
     profile = relationship("Profile", back_populates="transaction_splits")
-
-
-# ---------------------------------------------------------------------------
-# Tags
-# ---------------------------------------------------------------------------
-
-class Tag(Base):
-    __tablename__ = "tags"
-
-    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
-    household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=False)
-    name = Column(String, nullable=False)
-
-    household = relationship("Household", back_populates="tags")
-    transaction_tags = relationship("TransactionTag", back_populates="tag")
-
-
-class TransactionTag(Base):
-    __tablename__ = "transaction_tags"
-
-    transaction_id = Column(UUID(as_uuid=True), ForeignKey("transactions.id"), primary_key=True)
-    tag_id = Column(UUID(as_uuid=True), ForeignKey("tags.id"), primary_key=True)
-
-    transaction = relationship("Transaction", back_populates="transaction_tags")
-    tag = relationship("Tag", back_populates="transaction_tags")
 
 
 # ---------------------------------------------------------------------------
@@ -221,12 +217,14 @@ class Investment(Base):
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=True)
     name = Column(String, nullable=False)
-    instrument = Column(String, nullable=True)   # USER-DEFINED enum in DB
+    instrument = Column(String, nullable=True)   # stock | etf | mutual_fund | crypto | bond | gold
     account_id = Column(UUID(as_uuid=True), ForeignKey("accounts.id"), nullable=True)
     created_at = Column(DateTime(timezone=True), server_default=func.now())
 
     account = relationship("Account", back_populates="investments")
-    investment_transactions = relationship("InvestmentTransaction", back_populates="investment")
+    investment_transactions = relationship(
+        "InvestmentTransaction", back_populates="investment", cascade="all, delete-orphan"
+    )
 
 
 class InvestmentTransaction(Base):
@@ -254,7 +252,7 @@ class RecurringRule(Base):
 
     id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
     household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=True)
-    freq = Column(String, nullable=True)            # USER-DEFINED: daily | weekly | monthly | yearly
+    freq = Column(String, nullable=True)            # daily | weekly | monthly | yearly
     cron_expr = Column(String, nullable=True)
     next_run_at = Column(DateTime(timezone=True), nullable=True)
     is_active = Column(Boolean, nullable=False, default=True)
@@ -286,3 +284,61 @@ class Settlement(Base):
     to_profile = relationship(
         "Profile", foreign_keys=[to_profile_id], back_populates="settlements_to"
     )
+
+
+# ---------------------------------------------------------------------------
+# Goals
+# ---------------------------------------------------------------------------
+
+class Goal(Base):
+    __tablename__ = "goals"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=False)
+    name = Column(String, nullable=False)
+    category = Column(String, nullable=True)
+    target_amount = Column(Numeric(14, 2), nullable=False)
+    current_amount = Column(Numeric(14, 2), nullable=False, default=0)
+    monthly_contribution = Column(Numeric(14, 2), nullable=False, default=0)
+    target_date = Column(Date, nullable=True)
+    status = Column(String, nullable=False, default="on-track")  # on-track | behind | completed
+    description = Column(Text, nullable=True)
+    # "YYYY-MM" of the last month the auto-contribute job applied
+    # monthly_contribution, so it never double-applies in the same month.
+    last_contributed_period = Column(String, nullable=True)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+
+
+# ---------------------------------------------------------------------------
+# User settings — singleton row per household
+# ---------------------------------------------------------------------------
+
+class UserSettings(Base):
+    __tablename__ = "user_settings"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=False, unique=True)
+    default_currency = Column(String, nullable=False, default="INR")
+    date_format = Column(String, nullable=False, default="dmy")
+    number_format = Column(String, nullable=False, default="in")
+    fiscal_year_start = Column(String, nullable=False, default="jan")
+    theme = Column(String, nullable=False, default="dark")
+    notifications = Column(JSON, nullable=False, default=dict)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())
+    updated_at = Column(DateTime(timezone=True), server_default=func.now(), onupdate=func.now())
+
+
+# ---------------------------------------------------------------------------
+# Net worth snapshots — daily history for the Reports Net Worth tab
+# ---------------------------------------------------------------------------
+
+class NetWorthSnapshot(Base):
+    __tablename__ = "net_worth_snapshots"
+
+    id = Column(UUID(as_uuid=True), primary_key=True, default=uuid.uuid4)
+    household_id = Column(UUID(as_uuid=True), ForeignKey("households.id"), nullable=False)
+    snapshot_date = Column(Date, nullable=False)
+    total_assets = Column(Numeric(14, 2), nullable=False)
+    total_liabilities = Column(Numeric(14, 2), nullable=False)
+    net_worth = Column(Numeric(14, 2), nullable=False)
+    created_at = Column(DateTime(timezone=True), server_default=func.now())

@@ -1,6 +1,7 @@
 "use client"
 
 import { useCallback, useEffect, useState } from "react"
+import { useCurrency } from "@/lib/currency"
 import {
   fetchRecurringRules,
   fetchAccounts,
@@ -112,15 +113,81 @@ const chartConfig = {
   expenses: { label: "Expenses", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
+const FREQ_OPTIONS = [
+  { value: "daily", label: "Daily" },
+  { value: "weekly", label: "Weekly" },
+  { value: "biweekly", label: "Bi-weekly" },
+  { value: "monthly", label: "Monthly" },
+  { value: "quarterly", label: "Quarterly" },
+  { value: "yearly", label: "Yearly" },
+]
+
+function EditFrequencyDialog({
+  item,
+  open,
+  onClose,
+  onSaved,
+}: {
+  item: RecurringItem
+  open: boolean
+  onClose: () => void
+  onSaved: (id: string, freq: string) => void
+}) {
+  const [freq, setFreq] = useState(item.frequency)
+  const [saving, setSaving] = useState(false)
+
+  useEffect(() => { if (open) setFreq(item.frequency) }, [open, item.frequency])
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      await updateRecurringRule(item.id, { freq })
+      onSaved(item.id, freq)
+      onClose()
+    } catch (err) { console.error(err) } finally { setSaving(false) }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent className="sm:max-w-xs">
+        <DialogHeader>
+          <DialogTitle>Edit Frequency</DialogTitle>
+          <DialogDescription>{item.name}</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-2 py-2">
+          <Label>Frequency</Label>
+          <Select value={freq} onValueChange={setFreq}>
+            <SelectTrigger>
+              <SelectValue />
+            </SelectTrigger>
+            <SelectContent>
+              {FREQ_OPTIONS.map((o) => (
+                <SelectItem key={o.value} value={o.value}>{o.label}</SelectItem>
+              ))}
+            </SelectContent>
+          </Select>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSave} disabled={saving}>{saving ? "Saving…" : "Save"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
+}
+
 function RecurringCard({
   item,
   onToggle,
   onDelete,
+  onEditFreq,
 }: {
   item: RecurringItem
   onToggle: (id: string, active: boolean) => void
   onDelete: (id: string) => void
+  onEditFreq: (item: RecurringItem) => void
 }) {
+  const { format } = useCurrency()
   const isIncome = item.type === "income"
   const isActive = item.status === "active"
 
@@ -147,7 +214,7 @@ function RecurringCard({
       <div className="flex items-center gap-4">
         <div className="text-right">
           <p className={`font-semibold tabular-nums ${isIncome ? "text-success" : "text-foreground"}`}>
-            {isIncome ? "+" : "-"}${item.amount.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+            {format(isIncome ? item.amount : -item.amount, { signDisplay: "exceptZero" })}
           </p>
           <Badge
             variant="secondary"
@@ -172,6 +239,9 @@ function RecurringCard({
           <DropdownMenuContent align="end">
             <DropdownMenuItem onClick={() => onToggle(item.id, !isActive)}>
               {isActive ? "Pause" : "Resume"}
+            </DropdownMenuItem>
+            <DropdownMenuItem onClick={() => onEditFreq(item)}>
+              Edit Frequency
             </DropdownMenuItem>
             <DropdownMenuSeparator />
             <DropdownMenuItem
@@ -335,7 +405,9 @@ function AddRecurringDialog({
 }
 
 export default function RecurringPage() {
+  const { format, formatCompact } = useCurrency()
   const [isAddOpen, setIsAddOpen] = useState(false)
+  const [editItem, setEditItem] = useState<RecurringItem | null>(null)
   const [rules, setRules] = useState<RecurringRule[]>([])
   const [accounts, setAccounts] = useState<Account[]>([])
   const [categories, setCategories] = useState<Category[]>([])
@@ -381,6 +453,12 @@ export default function RecurringPage() {
     setGroups(groupRules(updated))
   }
 
+  const handleFreqSaved = (id: string, freq: string) => {
+    const updated = rules.map((r) => r.id === id ? { ...r, freq } : r)
+    setRules(updated)
+    setGroups(groupRules(updated))
+  }
+
   const totalMonthlyIncome = groups.income.reduce((acc, t) => acc + t.amount, 0)
   const totalMonthlyBills = groups.bills.reduce((acc, t) => acc + t.amount, 0)
   const totalSubscriptions = groups.subscriptions.filter((t) => t.status === "active").reduce((acc, t) => acc + t.amount, 0)
@@ -415,7 +493,7 @@ export default function RecurringPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Monthly Income</p>
-                <p className="text-2xl font-bold text-success">+${totalMonthlyIncome.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-success">{format(totalMonthlyIncome, { signDisplay: "always" })}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-success/10">
                 <TrendingUp className="h-5 w-5 text-success" />
@@ -428,7 +506,7 @@ export default function RecurringPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Monthly Bills</p>
-                <p className="text-2xl font-bold text-destructive">-${totalMonthlyBills.toLocaleString()}</p>
+                <p className="text-2xl font-bold text-destructive">{format(-totalMonthlyBills, { signDisplay: "always" })}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-destructive/10">
                 <TrendingDown className="h-5 w-5 text-destructive" />
@@ -441,7 +519,7 @@ export default function RecurringPage() {
             <div className="flex items-center justify-between">
               <div>
                 <p className="text-sm text-muted-foreground">Subscriptions</p>
-                <p className="text-2xl font-bold text-foreground">${totalSubscriptions.toFixed(2)}</p>
+                <p className="text-2xl font-bold text-foreground">{format(totalSubscriptions)}</p>
               </div>
               <div className="flex h-10 w-10 items-center justify-center rounded-full bg-primary/10">
                 <Repeat className="h-5 w-5 text-primary" />
@@ -474,7 +552,7 @@ export default function RecurringPage() {
             <ChartContainer config={chartConfig} className="h-[220px] w-full">
               <BarChart data={forecastData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
                 <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
-                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => `$${v}`} />
+                <YAxis tickLine={false} axisLine={false} tickMargin={8} fontSize={12} tickFormatter={(v) => formatCompact(v)} />
                 <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                 <Bar dataKey="income" fill="var(--color-income)" radius={[4, 4, 0, 0]} />
                 <Bar dataKey="expenses" fill="var(--color-expenses)" radius={[4, 4, 0, 0]} />
@@ -491,15 +569,15 @@ export default function RecurringPage() {
           <CardContent className="space-y-4">
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Recurring Income</span>
-              <span className="font-medium text-success">+${totalMonthlyIncome.toLocaleString()}</span>
+              <span className="font-medium text-success">{format(totalMonthlyIncome, { signDisplay: "always" })}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Bills & Subscriptions</span>
-              <span className="font-medium text-destructive">-${(totalMonthlyBills + totalSubscriptions).toLocaleString()}</span>
+              <span className="font-medium text-destructive">{format(-(totalMonthlyBills + totalSubscriptions), { signDisplay: "always" })}</span>
             </div>
             <div className="flex items-center justify-between text-sm">
               <span className="text-muted-foreground">Transfers</span>
-              <span className="font-medium text-foreground">-${totalTransfers.toLocaleString()}</span>
+              <span className="font-medium text-foreground">{format(-totalTransfers, { signDisplay: "always" })}</span>
             </div>
             <div className="border-t border-border pt-3 flex items-center justify-between">
               <span className="font-semibold text-foreground">Net Monthly</span>
@@ -508,7 +586,7 @@ export default function RecurringPage() {
                   ? "text-success"
                   : "text-destructive"
               }`}>
-                ${(totalMonthlyIncome - totalMonthlyBills - totalSubscriptions - totalTransfers).toLocaleString()}
+                {format(totalMonthlyIncome - totalMonthlyBills - totalSubscriptions - totalTransfers)}
               </span>
             </div>
           </CardContent>
@@ -551,6 +629,7 @@ export default function RecurringPage() {
                           item={item}
                           onToggle={handleToggle}
                           onDelete={handleDelete}
+                          onEditFreq={setEditItem}
                         />
                       ))
                     )}
@@ -561,6 +640,15 @@ export default function RecurringPage() {
           )}
         </CardContent>
       </Card>
+
+      {editItem && (
+        <EditFrequencyDialog
+          item={editItem}
+          open={!!editItem}
+          onClose={() => setEditItem(null)}
+          onSaved={handleFreqSaved}
+        />
+      )}
 
       <AddRecurringDialog
         open={isAddOpen}

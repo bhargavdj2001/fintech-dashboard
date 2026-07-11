@@ -1,10 +1,14 @@
 "use client"
 
-import { useCallback, useEffect, useState } from "react"
+import { useCallback, useEffect, useMemo, useState } from "react"
 import Link from "next/link"
+import { useCurrency } from "@/lib/currency"
 import {
   fetchAccounts,
   fetchTransactions,
+  createAccount,
+  deleteAccount,
+  fetchHouseholdId,
   type Account,
   type Transaction,
 } from "@/lib/api"
@@ -19,8 +23,6 @@ import {
 } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
-import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
 import {
   DropdownMenu,
   DropdownMenuContent,
@@ -28,6 +30,16 @@ import {
   DropdownMenuSeparator,
   DropdownMenuTrigger,
 } from "@/components/ui/dropdown-menu"
+import {
+  Dialog,
+  DialogContent,
+  DialogDescription,
+  DialogFooter,
+  DialogHeader,
+  DialogTitle,
+} from "@/components/ui/dialog"
+import { Input } from "@/components/ui/input"
+import { Label } from "@/components/ui/label"
 import { Bar, BarChart, XAxis, YAxis } from "recharts"
 import { ChartConfig, ChartContainer, ChartTooltip, ChartTooltipContent } from "@/components/ui/chart"
 
@@ -43,23 +55,79 @@ const chartConfig = {
   spent: { label: "Spending", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
-// Placeholder spending history since we don't have monthly aggregates per account
-function buildSpendingHistory(balance: number) {
-  return [
-    { month: "Oct", spent: Math.round(balance * 0.7) },
-    { month: "Nov", spent: Math.round(balance * 0.9) },
-    { month: "Dec", spent: Math.round(balance * 1.2) },
-    { month: "Jan", spent: Math.round(balance * 0.8) },
-    { month: "Feb", spent: Math.round(balance * 1.0) },
-    { month: "Mar", spent: Math.round(balance) },
-  ]
+
+function AddCardDialog({
+  open,
+  onClose,
+  onCreated,
+}: {
+  open: boolean
+  onClose: () => void
+  onCreated: (a: Account) => void
+}) {
+  const [name, setName] = useState("")
+  const [balance, setBalance] = useState("")
+  const [saving, setSaving] = useState(false)
+  const [error, setError] = useState("")
+
+  const handleSubmit = async () => {
+    if (!name.trim()) { setError("Name is required"); return }
+    setSaving(true)
+    setError("")
+    try {
+      const householdId = await fetchHouseholdId()
+      const created = await createAccount({
+        household_id: householdId,
+        name: name.trim(),
+        type: "credit",
+        opening_balance: balance ? parseFloat(balance) : 0,
+      })
+      onCreated(created)
+      setName("")
+      setBalance("")
+      onClose()
+    } catch (err: unknown) {
+      setError(err instanceof Error ? err.message : "Failed to create card")
+    } finally {
+      setSaving(false)
+    }
+  }
+
+  return (
+    <Dialog open={open} onOpenChange={(v) => !v && onClose()}>
+      <DialogContent>
+        <DialogHeader>
+          <DialogTitle>Add Credit Card</DialogTitle>
+          <DialogDescription>Manually add a credit card account</DialogDescription>
+        </DialogHeader>
+        <div className="space-y-4 py-4">
+          {error && <p className="text-sm text-destructive">{error}</p>}
+          <div className="space-y-2">
+            <Label>Card Name</Label>
+            <Input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Rewards Card" />
+          </div>
+          <div className="space-y-2">
+            <Label>Opening Balance (amount owed)</Label>
+            <Input type="number" step="0.01" value={balance} onChange={(e) => setBalance(e.target.value)} placeholder="-0.00" />
+          </div>
+        </div>
+        <DialogFooter>
+          <Button variant="outline" onClick={onClose} disabled={saving}>Cancel</Button>
+          <Button onClick={handleSubmit} disabled={saving}>{saving ? "Adding..." : "Add Card"}</Button>
+        </DialogFooter>
+      </DialogContent>
+    </Dialog>
+  )
 }
 
 export default function CreditCardsPage() {
+  const { format, formatCompact } = useCurrency()
   const [creditCards, setCreditCards] = useState<Account[]>([])
   const [selectedCard, setSelectedCard] = useState<Account | null>(null)
   const [recentTxns, setRecentTxns] = useState<Transaction[]>([])
+  const [allCardTxns, setAllCardTxns] = useState<Transaction[]>([])
   const [loading, setLoading] = useState(true)
+  const [isAddOpen, setIsAddOpen] = useState(false)
 
   const loadAccounts = useCallback(() => {
     setLoading(true)
@@ -80,12 +148,46 @@ export default function CreditCardsPage() {
     fetchTransactions({ account_id: selectedCard.id, limit: 5, offset: 0 })
       .then((res) => setRecentTxns(res.items))
       .catch(console.error)
+    fetchTransactions({ account_id: selectedCard.id, limit: 500, offset: 0 })
+      .then((res) => setAllCardTxns(res.items))
+      .catch(console.error)
   }, [selectedCard])
 
-  const totalBalance = creditCards.reduce((acc, c) => acc + c.balance, 0)
-  // Without a stored limit, we use a rough 30% utilization heuristic for display
-  // The real limit isn't in our schema, so we show what we have
-  const estimatedLimit = creditCards.length > 0 ? totalBalance / 0.15 : 0
+  const spendingHistory = useMemo(() => {
+    const now = new Date()
+    const months: { month: string; year: number; idx: number }[] = []
+    for (let i = 5; i >= 0; i--) {
+      const d = new Date(now.getFullYear(), now.getMonth() - i, 1)
+      months.push({ month: d.toLocaleString("default", { month: "short" }), year: d.getFullYear(), idx: d.getMonth() })
+    }
+    return months.map(({ month, year, idx }) => {
+      const spent = allCardTxns
+        .filter((t) => {
+          const d = new Date(t.occurred_at)
+          return t.type === "expense" && d.getFullYear() === year && d.getMonth() === idx
+        })
+        .reduce((s, t) => s + Math.abs(t.amount), 0)
+      return { month, spent: Math.round(spent * 100) / 100 }
+    })
+  }, [allCardTxns])
+
+  const totalBalance = creditCards.reduce((acc, c) => acc + c.current_balance, 0)
+
+  const handleCreated = (a: Account) => {
+    setCreditCards((prev) => [...prev, a])
+    setSelectedCard(a)
+  }
+
+  const handleRemove = async (card: Account) => {
+    if (!confirm(`Remove "${card.name}"?`)) return
+    try {
+      await deleteAccount(card.id)
+      setCreditCards((prev) => prev.filter((c) => c.id !== card.id))
+      if (selectedCard?.id === card.id) setSelectedCard(null)
+    } catch (err: unknown) {
+      alert(err instanceof Error ? err.message : "Failed to remove card")
+    }
+  }
 
   if (loading) {
     return (
@@ -112,10 +214,14 @@ export default function CreditCardsPage() {
         <Card>
           <CardContent className="py-12 text-center">
             <CreditCard className="mx-auto h-12 w-12 text-muted-foreground mb-4" />
-            <p className="text-muted-foreground">No credit card accounts in your data.</p>
-            <p className="text-xs text-muted-foreground mt-1">Add a credit card account in your database to see it here.</p>
+            <p className="text-muted-foreground">No credit card accounts yet.</p>
+            <Button size="sm" className="mt-4" onClick={() => setIsAddOpen(true)}>
+              <Plus className="mr-2 h-4 w-4" />
+              Add Card
+            </Button>
           </CardContent>
         </Card>
+        <AddCardDialog open={isAddOpen} onClose={() => setIsAddOpen(false)} onCreated={handleCreated} />
       </div>
     )
   }
@@ -132,11 +238,11 @@ export default function CreditCardsPage() {
           <div>
             <h1 className="text-2xl font-semibold tracking-tight text-foreground">Credit Cards</h1>
             <p className="text-sm text-muted-foreground">
-              {creditCards.length} card{creditCards.length !== 1 ? "s" : ""} · ${totalBalance.toLocaleString("en-US", { minimumFractionDigits: 2 })} total balance
+              {creditCards.length} card{creditCards.length !== 1 ? "s" : ""} · {format(totalBalance)} total balance
             </p>
           </div>
         </div>
-        <Button size="sm" variant="outline">
+        <Button size="sm" variant="outline" onClick={() => setIsAddOpen(true)}>
           <Plus className="mr-2 h-4 w-4" />
           Add Card
         </Button>
@@ -147,7 +253,7 @@ export default function CreditCardsPage() {
           <CardContent className="pt-6">
             <p className="text-sm text-muted-foreground">Total Balance</p>
             <p className="text-2xl font-bold text-destructive">
-              ${totalBalance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+              {format(totalBalance)}
             </p>
             <p className="text-xs text-muted-foreground mt-1">across {creditCards.length} card{creditCards.length !== 1 ? "s" : ""}</p>
           </CardContent>
@@ -218,16 +324,23 @@ export default function CreditCardsPage() {
                         <Link href="/transactions">View Transactions</Link>
                       </DropdownMenuItem>
                       <DropdownMenuSeparator />
-                      <DropdownMenuItem className="text-destructive">Remove Card</DropdownMenuItem>
+                      <DropdownMenuItem
+                        className="text-destructive"
+                        onClick={(e) => {
+                          e.stopPropagation()
+                          handleRemove(card)
+                        }}
+                      >
+                        Remove Card
+                      </DropdownMenuItem>
                     </DropdownMenuContent>
                   </DropdownMenu>
                 </div>
 
                 <div className="mt-4">
                   <p className="text-2xl font-bold text-destructive">
-                    ${card.balance.toLocaleString("en-US", { minimumFractionDigits: 2 })}
+                    {format(card.current_balance)}
                   </p>
-                  <p className="text-xs text-muted-foreground mt-0.5">{card.currency}</p>
                 </div>
               </CardContent>
             </Card>
@@ -239,12 +352,12 @@ export default function CreditCardsPage() {
             <Card>
               <CardHeader>
                 <CardTitle className="text-base font-semibold">Monthly Spending</CardTitle>
-                <CardDescription>{selectedCard.name} · estimated from balance</CardDescription>
+                <CardDescription>{selectedCard.name} · last 6 months</CardDescription>
               </CardHeader>
               <CardContent>
                 <ChartContainer config={chartConfig} className="h-[200px] w-full">
                   <BarChart
-                    data={buildSpendingHistory(selectedCard.balance)}
+                    data={spendingHistory}
                     margin={{ top: 10, right: 10, left: 0, bottom: 0 }}
                   >
                     <XAxis dataKey="month" tickLine={false} axisLine={false} tickMargin={8} fontSize={12} />
@@ -253,7 +366,7 @@ export default function CreditCardsPage() {
                       axisLine={false}
                       tickMargin={8}
                       fontSize={12}
-                      tickFormatter={(value) => `$${value}`}
+                      tickFormatter={(value) => formatCompact(value)}
                     />
                     <ChartTooltip content={<ChartTooltipContent />} cursor={{ fill: "var(--muted)", opacity: 0.3 }} />
                     <Bar dataKey="spent" fill="var(--color-spent)" radius={[4, 4, 0, 0]} />
@@ -302,7 +415,7 @@ export default function CreditCardsPage() {
                       <span className={`text-sm font-semibold tabular-nums ${
                         txn.type === "income" ? "text-success" : "text-foreground"
                       }`}>
-                        {txn.type === "income" ? "+" : "-"}${txn.amount.toFixed(2)}
+                        {format(txn.type === "income" ? txn.amount : -txn.amount, { signDisplay: "exceptZero" })}
                       </span>
                     </div>
                   ))
@@ -312,6 +425,8 @@ export default function CreditCardsPage() {
           </div>
         )}
       </div>
+
+      <AddCardDialog open={isAddOpen} onClose={() => setIsAddOpen(false)} onCreated={handleCreated} />
     </div>
   )
 }

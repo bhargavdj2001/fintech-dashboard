@@ -1,5 +1,7 @@
 "use client"
 
+import { useEffect, useMemo, useState } from "react"
+import Link from "next/link"
 import {
   Sparkles,
   TrendingUp,
@@ -7,164 +9,156 @@ import {
   AlertTriangle,
   Target,
   Lightbulb,
-  PiggyBank,
-  ShoppingBag,
-  Coffee,
-  CreditCard,
   ArrowRight,
-  CheckCircle2,
   Clock,
-  RefreshCw,
 } from "lucide-react"
+import { useCurrency } from "@/lib/currency"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import { Badge } from "@/components/ui/badge"
-import { Progress } from "@/components/ui/progress"
-import { Bar, BarChart, Line, LineChart, ResponsiveContainer, XAxis, YAxis } from "recharts"
+import { Bar, BarChart, Line, LineChart, XAxis, YAxis } from "recharts"
 import {
   ChartConfig,
   ChartContainer,
   ChartTooltip,
   ChartTooltipContent,
 } from "@/components/ui/chart"
+import {
+  fetchInsights,
+  fetchTransactions,
+  fetchGoals,
+  fetchRecurringRules,
+  type Insight,
+  type Transaction,
+  type Goal,
+  type RecurringRule,
+} from "@/lib/api"
 
-const savingsData = [
-  { month: "Jan", rate: 18 },
-  { month: "Feb", rate: 22 },
-  { month: "Mar", rate: 19 },
-  { month: "Apr", rate: 25 },
-  { month: "May", rate: 28 },
-  { month: "Jun", rate: 24 },
-]
-
-const spendingTrends = [
-  { category: "Food & Dining", current: 1200, previous: 980, change: 22.4 },
-  { category: "Shopping", current: 650, previous: 820, change: -20.7 },
-  { category: "Transportation", current: 420, previous: 380, change: 10.5 },
-  { category: "Entertainment", current: 380, previous: 450, change: -15.6 },
-]
-
-const recurringPayments = [
-  { name: "Netflix", amount: 15.99, frequency: "Monthly", detected: "12 months" },
-  { name: "Spotify", amount: 9.99, frequency: "Monthly", detected: "8 months" },
-  { name: "AWS", amount: 45.0, frequency: "Monthly", detected: "6 months" },
-  { name: "Gym Membership", amount: 49.99, frequency: "Monthly", detected: "4 months" },
-  { name: "Adobe Creative Cloud", amount: 54.99, frequency: "Monthly", detected: "3 months" },
-]
-
-const financialGoals = [
-  {
-    name: "Emergency Fund",
-    target: 15000,
-    current: 12500,
-    deadline: "Jun 2024",
-    icon: PiggyBank,
-    color: "bg-chart-1",
-  },
-  {
-    name: "Vacation Fund",
-    target: 5000,
-    current: 3200,
-    deadline: "Aug 2024",
-    icon: Target,
-    color: "bg-chart-2",
-  },
-  {
-    name: "New Car Down Payment",
-    target: 10000,
-    current: 4500,
-    deadline: "Dec 2024",
-    icon: CreditCard,
-    color: "bg-chart-3",
-  },
-]
-
-const aiInsights = [
-  {
-    id: "1",
-    type: "anomaly",
-    priority: "high",
-    icon: AlertTriangle,
-    title: "Unusual Spending Detected",
-    description:
-      "Your dining expenses are 40% higher than your 3-month average. You've spent $1,200 this month compared to your usual $850.",
-    action: "Review Transactions",
-    color: "text-warning",
-    bgColor: "bg-warning/10",
-  },
-  {
-    id: "2",
-    type: "positive",
-    priority: "medium",
-    icon: TrendingUp,
-    title: "Savings Rate Improved",
-    description:
-      "Great job! Your savings rate increased from 18% to 28% over the past 6 months. At this rate, you'll reach your emergency fund goal 2 months early.",
-    action: "View Progress",
-    color: "text-success",
-    bgColor: "bg-success/10",
-  },
-  {
-    id: "3",
-    type: "opportunity",
-    priority: "medium",
-    icon: Lightbulb,
-    title: "Potential Savings Opportunity",
-    description:
-      "You have 5 active subscriptions totaling $175.96/month. Consider reviewing if all are still needed.",
-    action: "Review Subscriptions",
-    color: "text-primary",
-    bgColor: "bg-primary/10",
-  },
-  {
-    id: "4",
-    type: "forecast",
-    priority: "low",
-    icon: Target,
-    title: "Budget Forecast",
-    description:
-      "Based on your current spending pattern, you're projected to be $250 under budget this month. Consider allocating extra to savings.",
-    action: "Adjust Budget",
-    color: "text-chart-2",
-    bgColor: "bg-chart-2/10",
-  },
-]
-
-const weeklySpending = [
-  { day: "Mon", amount: 45 },
-  { day: "Tue", amount: 78 },
-  { day: "Wed", amount: 32 },
-  { day: "Thu", amount: 120 },
-  { day: "Fri", amount: 95 },
-  { day: "Sat", amount: 180 },
-  { day: "Sun", amount: 65 },
-]
+const TYPE_STYLE: Record<string, { icon: typeof AlertTriangle; color: string; bgColor: string }> = {
+  alert: { icon: AlertTriangle, color: "text-warning", bgColor: "bg-warning/10" },
+  anomaly: { icon: AlertTriangle, color: "text-warning", bgColor: "bg-warning/10" },
+  positive: { icon: TrendingUp, color: "text-success", bgColor: "bg-success/10" },
+  goal: { icon: Target, color: "text-primary", bgColor: "bg-primary/10" },
+  opportunity: { icon: Lightbulb, color: "text-primary", bgColor: "bg-primary/10" },
+  forecast: { icon: TrendingDown, color: "text-chart-2", bgColor: "bg-chart-2/10" },
+}
 
 const chartConfig = {
-  rate: {
-    label: "Savings Rate",
-    color: "var(--chart-1)",
-  },
-  amount: {
-    label: "Spending",
-    color: "var(--chart-4)",
-  },
+  rate: { label: "Savings Rate", color: "var(--chart-1)" },
+  amount: { label: "Spending", color: "var(--chart-4)" },
 } satisfies ChartConfig
 
+const WEEKDAY_LABELS = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"]
+
 export default function InsightsPage() {
+  const { format, formatCompact } = useCurrency()
+  const [insights, setInsights] = useState<Insight[]>([])
+  const [transactions, setTransactions] = useState<Transaction[]>([])
+  const [goals, setGoals] = useState<Goal[]>([])
+  const [recurringRules, setRecurringRules] = useState<RecurringRule[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    Promise.all([
+      fetchInsights(),
+      fetchTransactions({ limit: 500 }),
+      fetchGoals(),
+      fetchRecurringRules(),
+    ])
+      .then(([insightsData, txnsRes, goalsData, rulesData]) => {
+        setInsights(insightsData)
+        setTransactions(txnsRes.items)
+        setGoals(goalsData)
+        setRecurringRules(rulesData)
+      })
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
+  // Savings rate by month, computed from real transactions.
+  const savingsData = useMemo(() => {
+    const byMonth = new Map<string, { income: number; expense: number }>()
+    for (const t of transactions) {
+      const key = t.occurred_at.slice(0, 7) // YYYY-MM
+      const entry = byMonth.get(key) ?? { income: 0, expense: 0 }
+      if (t.type === "income") entry.income += t.amount
+      else if (t.type === "expense") entry.expense += t.amount
+      byMonth.set(key, entry)
+    }
+    return Array.from(byMonth.entries())
+      .sort(([a], [b]) => a.localeCompare(b))
+      .slice(-6)
+      .map(([key, { income, expense }]) => ({
+        month: new Date(`${key}-01`).toLocaleDateString("en-US", { month: "short" }),
+        rate: income > 0 ? Math.round(((income - expense) / income) * 100) : 0,
+      }))
+  }, [transactions])
+
+  // Spending by weekday over the last 7 days.
+  const weeklySpending = useMemo(() => {
+    const now = new Date()
+    const sevenDaysAgo = new Date(now)
+    sevenDaysAgo.setDate(now.getDate() - 7)
+    const byDay = new Array(7).fill(0)
+    for (const t of transactions) {
+      if (t.type !== "expense") continue
+      const d = new Date(t.occurred_at)
+      if (d < sevenDaysAgo || d > now) continue
+      byDay[d.getDay()] += t.amount
+    }
+    return WEEKDAY_LABELS.map((day, i) => ({ day, amount: byDay[i] }))
+  }, [transactions])
+
+  // Category spending this month vs last month.
+  const spendingTrends = useMemo(() => {
+    const now = new Date()
+    const curStart = new Date(now.getFullYear(), now.getMonth(), 1)
+    const prevStart = new Date(now.getFullYear(), now.getMonth() - 1, 1)
+    const prevEnd = new Date(now.getFullYear(), now.getMonth(), 0, 23, 59, 59)
+
+    const current = new Map<string, number>()
+    const previous = new Map<string, number>()
+    for (const t of transactions) {
+      if (t.type !== "expense") continue
+      const name = t.category?.name ?? "Uncategorized"
+      const d = new Date(t.occurred_at)
+      if (d >= curStart) current.set(name, (current.get(name) ?? 0) + t.amount)
+      else if (d >= prevStart && d <= prevEnd) previous.set(name, (previous.get(name) ?? 0) + t.amount)
+    }
+    const categories = new Set([...current.keys(), ...previous.keys()])
+    return Array.from(categories)
+      .map((category) => {
+        const cur = current.get(category) ?? 0
+        const prev = previous.get(category) ?? 0
+        const change = prev > 0 ? ((cur - prev) / prev) * 100 : 0
+        return { category, current: cur, previous: prev, change }
+      })
+      .filter((t) => t.current > 0 || t.previous > 0)
+      .sort((a, b) => b.current - a.current)
+      .slice(0, 4)
+  }, [transactions])
+
+  const maxTrendAmount = Math.max(1, ...spendingTrends.map((t) => t.current))
+
+  const activeRecurringRules = recurringRules.filter((r) => r.is_active)
+  const totalRecurringMonthly = activeRecurringRules.reduce(
+    (acc, r) => acc + (Number(r.template_txn?.amount) || 0),
+    0
+  )
+
+  const goalsOnTrack = goals.filter((g) => g.status === "on-track" || g.status === "completed").length
+  const alertCount = insights.filter((i) => i.priority === "high").length
+  const currentMonthRate = savingsData.length > 0 ? savingsData[savingsData.length - 1].rate : 0
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <div>
           <h1 className="text-2xl font-semibold tracking-tight text-foreground">Financial Insights</h1>
           <p className="text-sm text-muted-foreground">
-            AI-powered analysis and recommendations for your finances
+            Rule-based analysis and recommendations computed from your real data
           </p>
         </div>
-        <Button variant="outline" size="sm">
-          <RefreshCw className="mr-2 h-4 w-4" />
-          Refresh Insights
-        </Button>
       </div>
 
       <div className="grid gap-4 md:grid-cols-4">
@@ -176,7 +170,7 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Savings Rate</p>
-                <p className="text-2xl font-bold text-foreground">28%</p>
+                <p className="text-2xl font-bold text-foreground">{currentMonthRate}%</p>
               </div>
             </div>
           </CardContent>
@@ -189,7 +183,7 @@ export default function InsightsPage() {
               </div>
               <div>
                 <p className="text-sm text-muted-foreground">Goals on Track</p>
-                <p className="text-2xl font-bold text-foreground">2/3</p>
+                <p className="text-2xl font-bold text-foreground">{goalsOnTrack}/{goals.length}</p>
               </div>
             </div>
           </CardContent>
@@ -201,8 +195,8 @@ export default function InsightsPage() {
                 <AlertTriangle className="h-5 w-5 text-warning" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Alerts</p>
-                <p className="text-2xl font-bold text-foreground">2</p>
+                <p className="text-sm text-muted-foreground">High-Priority Alerts</p>
+                <p className="text-2xl font-bold text-foreground">{alertCount}</p>
               </div>
             </div>
           </CardContent>
@@ -214,8 +208,8 @@ export default function InsightsPage() {
                 <Sparkles className="h-5 w-5 text-chart-2" />
               </div>
               <div>
-                <p className="text-sm text-muted-foreground">Financial Score</p>
-                <p className="text-2xl font-bold text-foreground">78</p>
+                <p className="text-sm text-muted-foreground">Total Insights</p>
+                <p className="text-2xl font-bold text-foreground">{insights.length}</p>
               </div>
             </div>
           </CardContent>
@@ -227,49 +221,59 @@ export default function InsightsPage() {
           <CardHeader>
             <div className="flex items-center gap-2">
               <Sparkles className="h-5 w-5 text-primary" />
-              <CardTitle className="text-base font-semibold">AI Insights</CardTitle>
+              <CardTitle className="text-base font-semibold">Insights</CardTitle>
             </div>
-            <CardDescription>Personalized recommendations based on your data</CardDescription>
+            <CardDescription>Computed from your transactions, budgets, and goals</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {aiInsights.map((insight) => (
-              <div
-                key={insight.id}
-                className="flex gap-4 rounded-lg border border-border/50 bg-muted/30 p-4 transition-colors hover:bg-muted/50"
-              >
+            {!loading && insights.length === 0 && (
+              <p className="py-8 text-center text-sm text-muted-foreground">
+                No insights yet — insights build up as you log transactions and budgets.
+              </p>
+            )}
+            {insights.map((insight) => {
+              const style = TYPE_STYLE[insight.type] ?? TYPE_STYLE.alert
+              return (
                 <div
-                  className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${insight.bgColor}`}
+                  key={insight.id}
+                  className="flex gap-4 rounded-lg border border-border/50 bg-muted/30 p-4 transition-colors hover:bg-muted/50"
                 >
-                  <insight.icon className={`h-5 w-5 ${insight.color}`} />
-                </div>
-                <div className="min-w-0 flex-1">
-                  <div className="flex items-start justify-between gap-2">
-                    <div>
-                      <p className="font-medium text-foreground">{insight.title}</p>
-                      <Badge
-                        variant="secondary"
-                        className={`mt-1 ${
-                          insight.priority === "high"
-                            ? "bg-destructive/10 text-destructive"
-                            : insight.priority === "medium"
-                            ? "bg-warning/10 text-warning"
-                            : "bg-muted text-muted-foreground"
-                        }`}
-                      >
-                        {insight.priority} priority
-                      </Badge>
-                    </div>
+                  <div className={`flex h-10 w-10 flex-shrink-0 items-center justify-center rounded-lg ${style.bgColor}`}>
+                    <style.icon className={`h-5 w-5 ${style.color}`} />
                   </div>
-                  <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
-                    {insight.description}
-                  </p>
-                  <Button variant="link" className="mt-2 h-auto p-0 text-primary">
-                    {insight.action}
-                    <ArrowRight className="ml-1 h-3 w-3" />
-                  </Button>
+                  <div className="min-w-0 flex-1">
+                    <div className="flex items-start justify-between gap-2">
+                      <div>
+                        <p className="font-medium text-foreground">{insight.title}</p>
+                        <Badge
+                          variant="secondary"
+                          className={`mt-1 ${
+                            insight.priority === "high"
+                              ? "bg-destructive/10 text-destructive"
+                              : insight.priority === "medium"
+                              ? "bg-warning/10 text-warning"
+                              : "bg-muted text-muted-foreground"
+                          }`}
+                        >
+                          {insight.priority} priority
+                        </Badge>
+                      </div>
+                    </div>
+                    <p className="mt-2 text-sm text-muted-foreground leading-relaxed">
+                      {insight.description}
+                    </p>
+                    {insight.action && insight.action_href && (
+                      <Button variant="link" className="mt-2 h-auto p-0 text-primary" asChild>
+                        <Link href={insight.action_href}>
+                          {insight.action}
+                          <ArrowRight className="ml-1 h-3 w-3" />
+                        </Link>
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </div>
-            ))}
+              )
+            })}
           </CardContent>
         </Card>
 
@@ -280,32 +284,38 @@ export default function InsightsPage() {
               <CardDescription>Your monthly savings percentage</CardDescription>
             </CardHeader>
             <CardContent>
-              <ChartContainer config={chartConfig} className="h-[180px] w-full">
-                <LineChart data={savingsData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
-                  <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
-                  <YAxis
-                    tickLine={false}
-                    axisLine={false}
-                    fontSize={12}
-                    tickFormatter={(value) => `${value}%`}
-                  />
-                  <ChartTooltip content={<ChartTooltipContent />} />
-                  <Line
-                    type="monotone"
-                    dataKey="rate"
-                    stroke="var(--color-rate)"
-                    strokeWidth={2}
-                    dot={{ fill: "var(--color-rate)", strokeWidth: 0, r: 4 }}
-                  />
-                </LineChart>
-              </ChartContainer>
+              {savingsData.length < 2 ? (
+                <p className="py-8 text-center text-sm text-muted-foreground">
+                  Not enough history yet to chart a trend.
+                </p>
+              ) : (
+                <ChartContainer config={chartConfig} className="h-[180px] w-full">
+                  <LineChart data={savingsData} margin={{ top: 10, right: 10, left: 0, bottom: 0 }}>
+                    <XAxis dataKey="month" tickLine={false} axisLine={false} fontSize={12} />
+                    <YAxis
+                      tickLine={false}
+                      axisLine={false}
+                      fontSize={12}
+                      tickFormatter={(value) => `${value}%`}
+                    />
+                    <ChartTooltip content={<ChartTooltipContent />} />
+                    <Line
+                      type="monotone"
+                      dataKey="rate"
+                      stroke="var(--color-rate)"
+                      strokeWidth={2}
+                      dot={{ fill: "var(--color-rate)", strokeWidth: 0, r: 4 }}
+                    />
+                  </LineChart>
+                </ChartContainer>
+              )}
             </CardContent>
           </Card>
 
           <Card>
             <CardHeader>
               <CardTitle className="text-base font-semibold">Weekly Spending Pattern</CardTitle>
-              <CardDescription>Your spending by day of week</CardDescription>
+              <CardDescription>Your spending by day, last 7 days</CardDescription>
             </CardHeader>
             <CardContent>
               <ChartContainer config={chartConfig} className="h-[180px] w-full">
@@ -315,7 +325,7 @@ export default function InsightsPage() {
                     tickLine={false}
                     axisLine={false}
                     fontSize={12}
-                    tickFormatter={(value) => `$${value}`}
+                    tickFormatter={(value) => formatCompact(value)}
                   />
                   <ChartTooltip content={<ChartTooltipContent />} />
                   <Bar dataKey="amount" fill="var(--color-amount)" radius={[4, 4, 0, 0]} />
@@ -333,38 +343,42 @@ export default function InsightsPage() {
             <CardDescription>Compared to last month</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {spendingTrends.map((trend) => (
-              <div key={trend.category} className="space-y-2">
-                <div className="flex items-center justify-between text-sm">
-                  <span className="font-medium text-foreground">{trend.category}</span>
-                  <div className="flex items-center gap-2">
-                    <span className="tabular-nums text-muted-foreground">
-                      ${trend.current.toLocaleString()}
-                    </span>
-                    <span
-                      className={`flex items-center text-xs font-medium ${
-                        trend.change > 0 ? "text-destructive" : "text-success"
-                      }`}
-                    >
-                      {trend.change > 0 ? (
-                        <TrendingUp className="mr-0.5 h-3 w-3" />
-                      ) : (
-                        <TrendingDown className="mr-0.5 h-3 w-3" />
+            {spendingTrends.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No spending recorded yet.</p>
+            ) : (
+              spendingTrends.map((trend) => (
+                <div key={trend.category} className="space-y-2">
+                  <div className="flex items-center justify-between text-sm">
+                    <span className="font-medium text-foreground">{trend.category}</span>
+                    <div className="flex items-center gap-2">
+                      <span className="tabular-nums text-muted-foreground">
+                        {format(trend.current)}
+                      </span>
+                      {trend.previous > 0 && (
+                        <span
+                          className={`flex items-center text-xs font-medium ${
+                            trend.change > 0 ? "text-destructive" : "text-success"
+                          }`}
+                        >
+                          {trend.change > 0 ? (
+                            <TrendingUp className="mr-0.5 h-3 w-3" />
+                          ) : (
+                            <TrendingDown className="mr-0.5 h-3 w-3" />
+                          )}
+                          {Math.abs(trend.change).toFixed(0)}%
+                        </span>
                       )}
-                      {Math.abs(trend.change)}%
-                    </span>
+                    </div>
+                  </div>
+                  <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+                    <div
+                      className={`h-full rounded-full ${trend.change > 0 ? "bg-destructive" : "bg-success"}`}
+                      style={{ width: `${Math.min((trend.current / maxTrendAmount) * 100, 100)}%` }}
+                    />
                   </div>
                 </div>
-                <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-                  <div
-                    className={`h-full rounded-full ${
-                      trend.change > 0 ? "bg-destructive" : "bg-success"
-                    }`}
-                    style={{ width: `${Math.min((trend.current / 1500) * 100, 100)}%` }}
-                  />
-                </div>
-              </div>
-            ))}
+              ))
+            )}
           </CardContent>
         </Card>
 
@@ -374,70 +388,79 @@ export default function InsightsPage() {
             <CardDescription>Track your progress</CardDescription>
           </CardHeader>
           <CardContent className="space-y-4">
-            {financialGoals.map((goal) => {
-              const percentage = (goal.current / goal.target) * 100
-
-              return (
-                <div key={goal.name} className="space-y-2">
-                  <div className="flex items-center gap-3">
-                    <div className={`flex h-8 w-8 items-center justify-center rounded-lg ${goal.color}/10`}>
-                      <goal.icon className={`h-4 w-4 ${goal.color.replace('bg-', 'text-')}`} />
-                    </div>
-                    <div className="flex-1">
-                      <div className="flex items-center justify-between">
-                        <p className="text-sm font-medium text-foreground">{goal.name}</p>
-                        <Badge variant="secondary" className="text-xs">
-                          <Clock className="mr-1 h-3 w-3" />
-                          {goal.deadline}
-                        </Badge>
+            {goals.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No goals yet.</p>
+            ) : (
+              goals.map((goal) => {
+                const percentage = goal.target_amount > 0 ? (goal.current_amount / goal.target_amount) * 100 : 0
+                return (
+                  <div key={goal.id} className="space-y-2">
+                    <div className="flex items-center gap-3">
+                      <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10">
+                        <Target className="h-4 w-4 text-primary" />
                       </div>
-                      <p className="text-xs text-muted-foreground">
-                        ${goal.current.toLocaleString()} of ${goal.target.toLocaleString()}
-                      </p>
+                      <div className="flex-1">
+                        <div className="flex items-center justify-between">
+                          <p className="text-sm font-medium text-foreground">{goal.name}</p>
+                          {goal.target_date && (
+                            <Badge variant="secondary" className="text-xs">
+                              <Clock className="mr-1 h-3 w-3" />
+                              {new Date(goal.target_date).toLocaleDateString("en-US", { month: "short", year: "numeric" })}
+                            </Badge>
+                          )}
+                        </div>
+                        <p className="text-xs text-muted-foreground">
+                          {format(goal.current_amount)} of {format(goal.target_amount)}
+                        </p>
+                      </div>
+                    </div>
+                    <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+                      <div
+                        className="h-full rounded-full bg-primary"
+                        style={{ width: `${Math.min(percentage, 100)}%` }}
+                      />
                     </div>
                   </div>
-                  <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-                    <div
-                      className={`h-full rounded-full ${goal.color}`}
-                      style={{ width: `${percentage}%` }}
-                    />
-                  </div>
-                </div>
-              )
-            })}
+                )
+              })
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
             <CardTitle className="text-base font-semibold">Recurring Payments</CardTitle>
-            <CardDescription>Detected subscriptions</CardDescription>
+            <CardDescription>Active recurring rules</CardDescription>
           </CardHeader>
           <CardContent className="space-y-3">
-            {recurringPayments.map((payment) => (
-              <div
-                key={payment.name}
-                className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2.5"
-              >
-                <div>
-                  <p className="text-sm font-medium text-foreground">{payment.name}</p>
-                  <p className="text-xs text-muted-foreground">
-                    {payment.frequency} • Detected {payment.detected}
-                  </p>
+            {activeRecurringRules.length === 0 ? (
+              <p className="py-8 text-center text-sm text-muted-foreground">No active recurring payments.</p>
+            ) : (
+              <>
+                {activeRecurringRules.map((rule) => (
+                  <div
+                    key={rule.id}
+                    className="flex items-center justify-between rounded-lg bg-muted/50 px-3 py-2.5"
+                  >
+                    <div>
+                      <p className="text-sm font-medium text-foreground">
+                        {String(rule.template_txn?.title ?? "Recurring payment")}
+                      </p>
+                      <p className="text-xs text-muted-foreground capitalize">{rule.freq}</p>
+                    </div>
+                    <span className="text-sm font-semibold tabular-nums text-foreground">
+                      {format(Number(rule.template_txn?.amount) || 0)}
+                    </span>
+                  </div>
+                ))}
+                <div className="pt-2 border-t border-border">
+                  <div className="flex items-center justify-between">
+                    <span className="text-sm text-muted-foreground">Total per period</span>
+                    <span className="text-lg font-bold text-foreground">{format(totalRecurringMonthly)}</span>
+                  </div>
                 </div>
-                <span className="text-sm font-semibold tabular-nums text-foreground">
-                  ${payment.amount.toFixed(2)}
-                </span>
-              </div>
-            ))}
-            <div className="pt-2 border-t border-border">
-              <div className="flex items-center justify-between">
-                <span className="text-sm text-muted-foreground">Total Monthly</span>
-                <span className="text-lg font-bold text-foreground">
-                  ${recurringPayments.reduce((acc, p) => acc + p.amount, 0).toFixed(2)}
-                </span>
-              </div>
-            </div>
+              </>
+            )}
           </CardContent>
         </Card>
       </div>
