@@ -7,11 +7,20 @@ Usage (run from backend/):
 """
 import argparse
 import datetime as dt
+import os
 import random
 import sys
 import uuid
 
 sys.path.insert(0, ".")
+
+# Safety guard: refuse to run against a remote/production database.
+_db_url = os.environ.get("DATABASE_URL", "")
+if any(host in _db_url for host in ["supabase.com", "render.com", "heroku.com", "railway.app", "neon.tech"]):
+    print("ERROR: seed.py is blocked from running against a remote database.")
+    print(f"  DATABASE_URL contains a production host: {_db_url.split('@')[-1].split('/')[0] if '@' in _db_url else '(masked)'}")
+    print("  This script is for LOCAL development only. Run it against a local DB.")
+    sys.exit(1)
 
 from app.database import SessionLocal  # noqa: E402
 from app.models import (  # noqa: E402
