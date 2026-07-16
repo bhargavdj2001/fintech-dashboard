@@ -126,7 +126,7 @@ class AccountOut(OrmBase):
     type: str
     currency: str
     opening_balance: float
-    current_balance: float
+    current_balance: float = 0.0
     external_id: Optional[str] = None
     last_synced_at: Optional[dt.datetime] = None
 

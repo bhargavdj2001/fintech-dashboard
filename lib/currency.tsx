@@ -29,10 +29,12 @@ export function currencySymbol(currency: string = "INR"): string {
 
 /** Compact axis-tick formatter, e.g. ₹12k — for chart ticks, not money displays. */
 export function formatCompact(amount: number, currency: string = "INR"): string {
+  if (!Number.isFinite(amount)) return "—"
   return `${currencySymbol(currency)}${(amount / 1000).toFixed(0)}k`
 }
 
 export function formatCurrency(amount: number, currency: string = "INR", opts?: Intl.NumberFormatOptions): string {
+  if (!Number.isFinite(amount)) return "—"
   const locale = CURRENCY_LOCALE[currency] ?? "en-IN"
   return new Intl.NumberFormat(locale, {
     style: "currency",
