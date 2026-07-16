@@ -36,6 +36,7 @@ from app.routes import (
     budgets,
     categories,
     dashboard,
+    debug,
     goals,
     households,
     insights,
@@ -249,6 +250,7 @@ app.include_router(settlements.router)
 app.include_router(goals.router)
 app.include_router(settings.router)
 app.include_router(insights.router)
+app.include_router(debug.router)
 
 # ---------------------------------------------------------------------------
 # Static uploads (receipts) — served directly off local disk, no external
