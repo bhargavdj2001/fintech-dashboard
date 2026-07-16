@@ -14,7 +14,6 @@ import {
   Repeat,
   FileText,
   Plus,
-  Search,
   Calculator,
   Settings,
   CreditCard,
@@ -104,10 +103,12 @@ export function CommandPalette() {
                       router.push("/transactions?action=add")
                       break
                     case "transfer":
-                      router.push("/accounts?action=transfer")
+                      // No standalone "transfer" UI exists — reuse the
+                      // transaction form with its Transfer type preselected.
+                      router.push("/transactions?action=add&type=transfer")
                       break
                     case "create-budget":
-                      router.push("/budgets?action=create")
+                      router.push("/budgets?action=add")
                       break
                     case "add-goal":
                       router.push("/goals?action=add")

@@ -1,13 +1,15 @@
 "use client"
 
 import { useEffect, useState } from "react"
-import { ArrowUpRight, ArrowDownLeft, MoreHorizontal } from "lucide-react"
+import { ArrowUpRight, ArrowDownLeft } from "lucide-react"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { Button } from "@/components/ui/button"
 import Link from "next/link"
 import { fetchTransactions, type Transaction } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 
 export function RecentTransactions() {
+  const { format } = useCurrency()
   const [transactions, setTransactions] = useState<Transaction[]>([])
 
   useEffect(() => {
@@ -70,8 +72,7 @@ export function RecentTransactions() {
                         : "text-foreground"
                     }`}
                   >
-                    {transaction.type === "income" ? "+" : ""}$
-                    {Math.abs(transaction.amount).toLocaleString()}
+                    {format(transaction.type === "income" ? transaction.amount : -transaction.amount, { signDisplay: "exceptZero" })}
                   </p>
                   <p className="text-xs text-muted-foreground">
                     {new Date(transaction.occurred_at).toLocaleDateString("en-US", {
@@ -81,9 +82,6 @@ export function RecentTransactions() {
                     })}
                   </p>
                 </div>
-                <Button variant="ghost" size="icon" className="h-8 w-8">
-                  <MoreHorizontal className="h-4 w-4" />
-                </Button>
               </div>
             </div>
           ))}

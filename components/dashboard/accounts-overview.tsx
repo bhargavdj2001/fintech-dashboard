@@ -2,8 +2,9 @@
 
 import { useEffect, useState } from "react"
 import { CreditCard, Building2, PiggyBank, Landmark, Banknote } from "lucide-react"
-import { Card, CardContent, CardHeader, CardTitle, CardDescription, CardFooter, CardAction } from "@/components/ui/card"
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { fetchAccounts, type Account } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 
 function accountIcon(type: string) {
   switch (type.toLowerCase()) {
@@ -16,6 +17,7 @@ function accountIcon(type: string) {
 }
 
 export function AccountsOverview() {
+  const { format } = useCurrency()
   const [accounts, setAccounts] = useState<Account[]>([])
 
   useEffect(() => {
@@ -49,11 +51,10 @@ export function AccountsOverview() {
                 </div>
                 <span
                   className={`text-sm font-semibold tabular-nums ${
-                    account.balance < 0 ? "text-destructive" : "text-foreground"
+                    account.current_balance < 0 ? "text-destructive" : "text-foreground"
                   }`}
                 >
-                  {account.balance < 0 ? "-" : ""}$
-                  {Math.abs(account.balance).toLocaleString()}
+                  {format(account.current_balance)}
                 </span>
               </div>
             )

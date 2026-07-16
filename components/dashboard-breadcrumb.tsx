@@ -42,7 +42,7 @@ export function DashboardBreadcrumb() {
   }
 
   const items = [
-    { label: "Dashboard", href: "/" },
+    { label: "Dashboard", href: "/", isLast: false as const },
     ...segments.map((segment, index) => ({
       label: routeLabels[segment] || segment.charAt(0).toUpperCase() + segment.slice(1),
       href: "/" + segments.slice(0, index + 1).join("/"),

@@ -4,6 +4,7 @@ import { useEffect, useState } from "react"
 import { Cell, Pie, PieChart, ResponsiveContainer } from "recharts"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
 import { fetchDashboardSummary } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 
 const COLORS = [
   "var(--chart-1)",
@@ -15,6 +16,7 @@ const COLORS = [
 ]
 
 export function SpendingBreakdown() {
+  const { format } = useCurrency()
   const [spendingData, setSpendingData] = useState<{ category: string; amount: number; color: string }[]>([])
 
   useEffect(() => {
@@ -67,7 +69,7 @@ export function SpendingBreakdown() {
               </ResponsiveContainer>
               <div className="absolute inset-0 flex flex-col items-center justify-center">
                 <span className="text-xs text-muted-foreground">Total</span>
-                <span className="text-lg font-bold text-foreground">${total.toLocaleString()}</span>
+                <span className="text-lg font-bold text-foreground">{format(total)}</span>
               </div>
             </div>
             <div className="flex-1 space-y-2">
@@ -81,7 +83,7 @@ export function SpendingBreakdown() {
                     <span className="text-xs text-muted-foreground">{item.category}</span>
                   </div>
                   <span className="text-xs font-medium text-foreground tabular-nums">
-                    ${item.amount.toLocaleString()}
+                    {format(item.amount)}
                   </span>
                 </div>
               ))}

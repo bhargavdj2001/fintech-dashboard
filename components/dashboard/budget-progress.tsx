@@ -1,17 +1,24 @@
 "use client"
 
+import { useEffect, useState } from "react"
+import { fetchBudgets, type Budget } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 import { Card, CardContent, CardDescription, CardHeader, CardTitle } from "@/components/ui/card"
-import { Progress } from "@/components/ui/progress"
 
-const budgets = [
-  { category: "Food & Dining", spent: 980, budget: 1200, color: "bg-chart-1" },
-  { category: "Transportation", spent: 420, budget: 500, color: "bg-chart-2" },
-  { category: "Entertainment", spent: 380, budget: 400, color: "bg-chart-3" },
-  { category: "Shopping", spent: 650, budget: 600, color: "bg-chart-4" },
-  { category: "Utilities", spent: 180, budget: 300, color: "bg-chart-5" },
-]
+const COLORS = ["bg-chart-1", "bg-chart-2", "bg-chart-3", "bg-chart-4", "bg-chart-5"]
 
 export function BudgetProgress() {
+  const { format } = useCurrency()
+  const [budgets, setBudgets] = useState<Budget[]>([])
+  const [loading, setLoading] = useState(true)
+
+  useEffect(() => {
+    fetchBudgets()
+      .then(setBudgets)
+      .catch(console.error)
+      .finally(() => setLoading(false))
+  }, [])
+
   return (
     <Card>
       <CardHeader>
@@ -19,33 +26,33 @@ export function BudgetProgress() {
         <CardDescription>Track your monthly spending limits</CardDescription>
       </CardHeader>
       <CardContent className="space-y-4">
-        {budgets.map((budget) => {
-          const percentage = Math.min((budget.spent / budget.budget) * 100, 100)
-          const isOverBudget = budget.spent > budget.budget
+        {loading ? (
+          <p className="text-sm text-muted-foreground">Loading...</p>
+        ) : budgets.length === 0 ? (
+          <p className="text-sm text-muted-foreground">No budgets set yet.</p>
+        ) : (
+          budgets.slice(0, 5).map((budget, idx) => {
+            const percentage = budget.amount > 0 ? Math.min((budget.spent / budget.amount) * 100, 100) : 0
+            const isOverBudget = budget.spent > budget.amount
 
-          return (
-            <div key={budget.category} className="space-y-2">
-              <div className="flex items-center justify-between text-sm">
-                <span className="font-medium text-foreground">{budget.category}</span>
-                <span
-                  className={`tabular-nums ${
-                    isOverBudget ? "text-destructive" : "text-muted-foreground"
-                  }`}
-                >
-                  ${budget.spent} / ${budget.budget}
-                </span>
+            return (
+              <div key={budget.id} className="space-y-2">
+                <div className="flex items-center justify-between text-sm">
+                  <span className="font-medium text-foreground">{budget.category?.name ?? budget.name}</span>
+                  <span className={`tabular-nums ${isOverBudget ? "text-destructive" : "text-muted-foreground"}`}>
+                    {format(budget.spent)} / {format(budget.amount)}
+                  </span>
+                </div>
+                <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
+                  <div
+                    className={`h-full rounded-full transition-all ${isOverBudget ? "bg-destructive" : COLORS[idx % COLORS.length]}`}
+                    style={{ width: `${percentage}%` }}
+                  />
+                </div>
               </div>
-              <div className="relative h-2 w-full overflow-hidden rounded-full bg-muted">
-                <div
-                  className={`h-full rounded-full transition-all ${
-                    isOverBudget ? "bg-destructive" : budget.color
-                  }`}
-                  style={{ width: `${percentage}%` }}
-                />
-              </div>
-            </div>
-          )
-        })}
+            )
+          })
+        )}
       </CardContent>
     </Card>
   )

@@ -22,11 +22,28 @@ def test_split_summary_numeric(client):
 
 
 def test_split_summary_net_balance_consistency(client):
+    """
+    net_balance = (you_paid - your_share) adjusted by settle-up payments:
+    Partner paying you down subtracts, you paying Partner down adds.
+    """
     body = client.get("/analytics/splits").json()
-    expected_net = round(body["you_paid"] - body["your_share"], 6)
+    settlements = client.get("/settlements").json()
+
+    settled_to_you = sum(
+        s["amount"] for s in settlements
+        if s["from_profile"]["name"] == "Partner" and s["to_profile"]["name"] == "Bhargav"
+    )
+    settled_by_you = sum(
+        s["amount"] for s in settlements
+        if s["from_profile"]["name"] == "Bhargav" and s["to_profile"]["name"] == "Partner"
+    )
+
+    expected_net = round(
+        body["you_paid"] - body["your_share"] + settled_by_you - settled_to_you, 6
+    )
     actual_net = round(body["net_balance"], 6)
     assert abs(expected_net - actual_net) < 0.01, (
-        f"net_balance={actual_net} != you_paid - your_share={expected_net}"
+        f"net_balance={actual_net} != expected={expected_net}"
     )
 
 

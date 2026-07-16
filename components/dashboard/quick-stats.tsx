@@ -4,16 +4,17 @@ import { useEffect, useState } from "react"
 import { ArrowUpRight, ArrowDownLeft, Wallet, CreditCard } from "lucide-react"
 import { Card, CardContent } from "@/components/ui/card"
 import { fetchDashboardSummary, type DashboardSummary } from "@/lib/api"
+import { useCurrency } from "@/lib/currency"
 
 export function QuickStats() {
+  const { format } = useCurrency()
   const [summary, setSummary] = useState<DashboardSummary | null>(null)
 
   useEffect(() => {
     fetchDashboardSummary().then(setSummary).catch(console.error)
   }, [])
 
-  const fmt = (n: number) =>
-    "$" + n.toLocaleString("en-US", { minimumFractionDigits: 0, maximumFractionDigits: 0 })
+  const fmt = (n: number) => format(n, { maximumFractionDigits: 0 })
 
   const stats = summary
     ? [
